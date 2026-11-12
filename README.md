@@ -11,9 +11,9 @@ LumiOS Platinum packs [Luminescent Platinum](https://luminescent.team) (Team Lum
 ## Features
 
 - **Luminescent Platinum 2.2F, whole.** Both halves of the mod are included. The `exefs` half (an IPS patch to `main` and the exlaunch plugin `subsdk1`) is applied when the app is built. The `romfs` half is laid over the game's files. iOS never has to change code while the game runs.
-- **Brilliant touch layout.** These touch controls follow how Brilliant Diamond uses its buttons. The keys are translucent and colourless, and each shows a symbol with a small button mark at its corner.
+- **Brilliant touch layout.** These touch controls follow how Brilliant Diamond uses its buttons. The keys are translucent and colourless, with no text: each shows a symbol and a small button mark at its corner.
   - A (✓) is the large key under your right thumb. B (↩), Y (⇄), X (☰) and + (☆, your registered key items) sit on an arc around it.
-  - The left stick is shaped like a Poké Ball and floats: it centres wherever your thumb lands. The D-pad above it has its own touch area, so the stick never presses it.
+  - The left stick is a fixed Poké Ball near the left edge: touch anywhere in its area and tilt from its centre. The D-pad above it has its own touch area, so the stick never presses it.
   - The top-right corner stays free, because the Pokétch shows there and you can tap it directly.
 - **Wide view (19.5:9).** The game renders the iPhone's full screen width itself. Nothing is stretched: models and the HUD keep their shapes. You can turn it off in the launcher to get 16:9 with bars.
 - **Cheats bubble.** A draggable button opens a panel of cheats while you play. Turn it on in the launcher. The cheat engine and the panel are in place, but the list of tested cheats is still to come.

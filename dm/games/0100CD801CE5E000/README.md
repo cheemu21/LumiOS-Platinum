@@ -65,4 +65,4 @@ General host changes first needed here; each applies to every game:
 
 ## Open
 
-- Resolved: the player-facing [README](../../../README.md) now links to the full games table instead of describing original Switch games' control layouts. Balatro's Tap layout is documented in this note.
+- Resolved: the player-facing [README](../../../NXNATIVE.md) now links to the full games table instead of describing original Switch games' control layouts. Balatro's Tap layout is documented in this note.

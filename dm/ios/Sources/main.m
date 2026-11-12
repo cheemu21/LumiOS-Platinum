@@ -178,6 +178,16 @@ static int boot_env(void) {
     if (!dm) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
+    {   // Cheats (hle_cheats.c): the files the app ships (dm/cheats, build_ipa.sh) are copied once into Documents/cheats, where the engine also keeps each cheat's on / off state;
+        // a file the player put there is kept. The in-game cheats bubble (DmCheats.m, DM_CHEAT_BUBBLE) turns them on and off
+        NSString *cd = [doc stringByAppendingPathComponent:@"cheats"], *src = [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"cheats"];
+        [fm createDirectoryAtPath:cd withIntermediateDirectories:YES attributes:nil error:nil];
+        for (NSString *f in [fm contentsOfDirectoryAtPath:src error:nil] ?: @[]) {
+            NSString *to = [cd stringByAppendingPathComponent:f]; NSString *from = [src stringByAppendingPathComponent:f];
+            if (![fm contentsEqualAtPath:from andPath:to]) { [fm removeItemAtPath:to error:nil]; [fm copyItemAtPath:from toPath:to error:nil]; }   // an app update brings its newer file
+        }
+        setenv("DM_CHEATS", cd.fileSystemRepresentation, 0);
+    }
     setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
     setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
     aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC

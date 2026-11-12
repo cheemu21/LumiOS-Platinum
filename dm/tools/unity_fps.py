@@ -18,6 +18,7 @@ Usage on its own: unity_fps.py <module>... (what it finds in each)"""
 import struct, sys, os
 
 TFR, VSYNC = 'UnityEngine.Application::set_targetFrameRate', 'UnityEngine.QualitySettings::get_vSyncCount'
+SW, SR = 'UnityEngine.Screen::get_width', 'UnityEngine.Screen::SetResolution'   # the screen manager (screen_manager)
 RET = 0xD65F03C0
 
 def adrp_page(w, pc):
@@ -159,11 +160,35 @@ def vsync_count(img, f, text_end):
         elif (u & 0x0A000000) != 0x08000000 or (u >> 22) & 1: regs.pop(d, None)   # anything else that may write a register (stores and FP loads do not)
     return None
 
+def screen_manager(img, f, text_end):
+    """Screen.get_width (Unity 2019.4, Pokémon Brilliant Diamond: main+0xdd8640): bl GetScreenManager; ldr x8, [x0]; ldr x1, [x8, #SLOT]; br x1, where GetScreenManager is adrp xP;
+    ldr x0, [xP, #lo]; ret: (the global holding the manager, the vtable slot of GetWidth), or None. The concrete manager's methods are read by the host from its vtable at run time
+    (hle_fpslock.c wide_tick): GetWidth is ldr w0, [x0, #W] there, and the Switch player's SetResolution caps the size at 1920x1080 and warns below 16:9"""
+    w = lambda a: struct.unpack_from('<I', img, a)[0]
+    for a in range(f, min(f + 0x20, text_end), 4):
+        if (w(a) >> 26) == 0b100101:
+            g = branch(w(a), a)
+            if not (0 <= g < text_end - 8 and is_adrp(w(g)) and (w(g + 4) & 0xFFC00000) == 0xF9400000 and w(g + 8) == RET): return None
+            glob = adrp_page(w(g), g) + ((w(g + 4) >> 10) & 0xFFF) * 8
+            l1, l2 = w(a + 4), w(a + 8)
+            if (l1 & 0xFFC003FF) != 0xF9400008 or (l2 & 0xFFC003E0) != 0xF9400100: return None   # ldr x8, [x0]; ldr xN, [x8, #slot]
+            return glob, ((l2 >> 10) & 0xFFF) * 8
+    return None
+
+def manager_slot(img, f, text_end):
+    """The vtable slot an internal call of the screen manager calls through (Screen.SetResolution: bl GetScreenManager; ldr x8, [x0]; ...; ldr x5, [x8, #0x10]; br x5), or None"""
+    w = lambda a: struct.unpack_from('<I', img, a)[0]
+    seen = False
+    for a in range(f, min(f + 0x60, text_end), 4):
+        if w(a) & 0xFFC003FF == 0xF9400008: seen = True; continue   # ldr x8, [x0]
+        if seen and (w(a) & 0xFFC003E0) == 0xF9400100: return ((w(a) >> 10) & 0xFFF) * 8
+    return None
+
 def find(img, text_end, ro_off, data_off):
     """({'target': global offset, 'qs': (global, idx, arr, size, vsync)} with what was found, reason); ({}, why) when main has no table. The reason has '[RED] ' when the table is
     there but a function's code was not read"""
     rel = relocated(img)
-    calls = icall_table(img, rel, ro_off, data_off) or icall_code(img, rel, text_end, ro_off, data_off, (TFR, VSYNC))
+    calls = icall_table(img, rel, ro_off, data_off) or icall_code(img, rel, text_end, ro_off, data_off, (TFR, VSYNC, SW, SR))
     if not calls: return {}, 'no Unity internal-call table'
     out, why = {}, []
     if TFR in calls:
@@ -174,6 +199,10 @@ def find(img, text_end, ro_off, data_off):
         v = vsync_count(img, calls[VSYNC], text_end)
         if v is not None and v[0] >= data_off: out['qs'] = v; why.append(f'vSyncCount at [[{v[0]:#x}]+{v[2]:#x}] + [[{v[0]:#x}]+{v[1]:#x}] * {v[3]:#x} + {v[4]:#x}')
         else: why.append(f'[RED] vSyncCount getter at {calls[VSYNC]:#x} not read')
+    if SW in calls:
+        sm = screen_manager(img, calls[SW], text_end)
+        rs = manager_slot(img, calls[SR], text_end) if SR in calls else None
+        if sm and sm[0] >= data_off and rs is not None: out['screen'] = (*sm, rs); why.append(f'screen manager at [{sm[0]:#x}], GetWidth in vtable slot {sm[1]:#x}, its resolution request in slot {rs:#x}')
     return out, f'Unity internal calls ({len(calls)}): ' + ', '.join(why)
 
 if __name__ == '__main__':

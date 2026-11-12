@@ -250,8 +250,45 @@ static void lock_find(void) {
 // presenting at a cap the game does not step by runs a fixed-step game fast or slow (Tears of the Kingdom 1.4.2 at 2x with DM_FPS_TARGET=60)
 int dm_fps_lock_engine(void) { pthread_once(&g_found, lock_find); return nrow || nier || fb.n || uq.base; }
 int nvn_fps_high_now(void);   // hle_nvn.c
+// Wide view for Unity (DM_WIDE_VIEW, hle_oe.c dm_wide_aspect): Unity's Switch player sizes its back buffer, its cameras' aspect and its UI canvas from the screen manager, which keeps the
+// size the game asked for (Screen.SetResolution, or the player's 1920x1080 docked / 1280x720 handheld) and caps it at 1920x1080 (Pokémon Brilliant Diamond 1.3.0: main+0x2c2898,
+// which warns below 16:9 and clamps each side). A wider shape therefore keeps the game's width and takes a lower height: 19.5:9 is 1920x886 docked, 1280x590 handheld. The host
+// requests that size the way Screen.SetResolution does (the manager's request fields, read from its own vtable: the resolution request method is stp w1, w2, [x0, #REQ], GetWidth
+// ldr w0, [x0, #W], GetHeight the slot after it), and Unity resizes everything itself on its next frame, so nothing is stretched: the 3D sees more at the sides and the HUD follows
+// its anchors. Checked every 15 presents; the game's own requests win as its width (a new mode), and the host then asks for that width's wide height
+double dm_wide_aspect(void);   // hle_oe.c
+extern void mtl_present_screen(uint32_t w, uint32_t h);
+static void wide_tick(void) {
+    static int init, n; static module_t *mm; static uint32_t woff, hoff, roff; static int32_t want_w, want_h; static double a;
+    if (!init) {
+        init = 1; a = dm_wide_aspect(); if (a <= 0) return;
+        for (int i = 0; i < g_nmod; i++) if (g_mod[i].unity_screen_ptr && g_mod[i].unity_screen_req) mm = &g_mod[i];
+        if (!mm) { LOG("[RED] wide view: DM_WIDE_VIEW is set, but main has no Unity screen manager the rewriter found (unity_fps.py): the picture stays 16:9"); return; }
+    }
+    if (!mm || ++n % 15) return;
+    uint64_t P = 0, vt = 0, f[3] = {0}; uint32_t ins[3] = {0};
+    if (!rd((uint64_t)mm->base + mm->unity_screen_ptr, &P, 8) || !P || !rd(P, &vt, 8) || !vt) return;   // not made yet
+    if (!woff) {
+        if (!rd(vt + mm->unity_screen_slot, &f[0], 8) || !rd(vt + mm->unity_screen_slot + 8, &f[1], 8) || !rd(vt + mm->unity_screen_req, &f[2], 8)) return;
+        for (int k = 0; k < 3; k++) if (!rd(f[k], &ins[k], 4)) return;
+        if ((ins[0] & 0xFFC003FF) != 0xB9400000 || (ins[1] & 0xFFC003FF) != 0xB9400000 || (ins[2] & 0xFFC07FFF) != 0x29000801) {   // ldr w0, [x0, #W]; ldr w0, [x0, #H]; stp w1, w2, [x0, #REQ]
+            LOG("[RED] wide view: the screen manager's methods are not the ones read on Unity 2019.4 (%08x %08x %08x): the picture stays 16:9", ins[0], ins[1], ins[2]); mm = NULL; return;
+        }
+        woff = ((ins[0] >> 10) & 0xFFF) * 4; hoff = ((ins[1] >> 10) & 0xFFF) * 4; roff = ((ins[2] >> 15) & 0x7F) * 4;
+        LOG("wide view: Unity's screen manager at %#llx: size at +%#x / +%#x, request at +%#x", (unsigned long long)P, woff, hoff, roff);
+    }
+    int32_t w = 0, h = 0; if (!rd(P + woff, &w, 4) || !rd(P + hoff, &h, 4) || w <= 0 || h <= 0) return;
+    if (w == want_w && h == want_h) return;
+    int32_t tw = w, th = (int32_t)(w / a / 2 + 0.5) * 2;   // the game's width (its mode), the screen's shape
+    if (th >= h) return;   // already as wide (or wider)
+    int32_t req[2] = {tw, th}; vm_size_t got = 0; (void)got;
+    if (vm_write(mach_task_self(), (vm_address_t)(P + roff), (vm_offset_t)req, sizeof req) != KERN_SUCCESS) { LOG("[RED] wide view: the resolution request could not be written"); mm = NULL; return; }
+    want_w = tw; want_h = th; mtl_present_screen((uint32_t)tw, (uint32_t)th);
+    LOG("wide view: the game's %dx%d → %dx%d (%.3f:1), requested from Unity's screen manager", w, h, tw, th, a);
+}
 void dm_fps_lock_tick(void) {
     dynamic_resolution_tick();   // separate from the FPS cap
+    wide_tick();
     static int state = -2, nlog[NLOCKS + 5], target, high; static const char *src;
     if (state == -1) return;
     if (state == -2) {

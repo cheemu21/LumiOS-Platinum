@@ -156,6 +156,8 @@ else [ "$GFXAPI" != nvn ] || t "no pipeline archive ($([ -n "${DM_PSO_GPUS+set}"
 # The packed language (DMLanguage) is the Game language row's default, which settings.py makes the game's first language when it lacks DM_LANG: the screen and DM_LAUNCHER=0 then agree
 LD=$(python3 -c 'import json, sys; print(next((s["default"] for s in json.load(open(sys.argv[1]))["settings"] if s["env"] == "DM_LANG"), ""))' $LJ) || die "launcher settings ($LJ)"
 if [ -n "$LD" ] && [ "$LD" != "$DM_LANG" ]; then t "game language: the game has no $DM_LANG; packing $LD, its first"; export DM_LANG=$LD; fi
+# Cheat files the profile ships (<profile>/cheats/<build ID>.txt and its .meta.tsv): into the bundle's dm/cheats, which main.m copies to Documents/cheats (the cheat engine keeps its toggles beside the file)
+if [ -d "$GD/cheats" ]; then mkdir -p Gen/dm/cheats && cp "$GD"/cheats/* Gen/dm/cheats/ || die "copy the profile's cheats"; t "cheats: $(ls "$GD/cheats" | tr '\n' ' ')"; fi
 # Diagnostic build: DM_ENV_FILE=file → dm/env.txt in the bundle (main.m sets one environment variable per line at boot)
 if [ -n "${DM_ENV_FILE:-}" ]; then cp "$DM_ENV_FILE" Gen/dm/env.txt || die "copy DM_ENV_FILE"; t "env: $(grep -v '^#' "$DM_ENV_FILE" | tr '\n' ' ')"; fi
 # The shader libraries go into the archive as DmIOS.app/msl/<folder>, or an NVN game's as the file DmIOS.app/msl/<folder>.img (main.m sets DM_MSL_DIR to msl)

@@ -668,11 +668,16 @@ def rd(o, enc):
     if app == 0x10: v += o
     if app == 0x30: v += ehs
     return v, sz
-_, penc, cenc, tenc = IMG[ehs:ehs + 4]
+# A module linked without .eh_frame_hdr (MOD0's range empty: Luminescent Platinum's subsdk1, an exlaunch plugin built with -fno-asynchronous-unwind-tables) has no function table;
+# what follows from it then takes each site alone (func_of's fallback), and the bytes there belong to the next section
+ehe = m0 + struct.unpack_from('<i', IMG, m0 + 20)[0]
+_, penc, cenc, tenc = IMG[ehs:ehs + 4] if ehe > ehs else (1, 0xFF, 0xFF, 0xFF)
 o = ehs + 4
-_, s = rd(o, penc); o += s
-nfde, s = rd(o, cenc); o += s
 starts = set()
+nfde = 0
+if ehe > ehs:
+    _, s = rd(o, penc); o += s
+    nfde, s = rd(o, cenc); o += s
 for _ in range(nfde):
     a, s = rd(o, tenc); o += s
     _, s = rd(o, tenc); o += s
@@ -2014,6 +2019,7 @@ with open(P('fixups.tsv'), 'w') as f:
     if FPS_TARGET_PTR is not None: f.write(f'# FPS_TARGET_PTR\t{FPS_TARGET_PTR:#x}\n# FPS_TARGET_FIELD\t{FPS_TARGET_FIELD:#x}\n')   # a target frame rate the game steps by (fps_target.py)
     if UE_FIXED_PTR is not None: f.write(f'# UE_FIXED_RATE_PTR\t{UE_FIXED_PTR:#x}\n# UE_FIXED_RATE_FIELD\t{UE_FIXED_FIELD:#x}\n# UE_FIXED_RATE_FLAG\t{UE_FIXED_FLAG:#x}\n')   # Unreal's GEngine, UEngine::FixedFrameRate and bUseFixedFrameRate (ue_fixed_rate.py)
     if 'target' in UNITY_FPS: f.write(f"# UNITY_TARGET_FPS\t{UNITY_FPS['target']:#x}\n")   # Unity's Application.targetFrameRate (unity_fps.py)
+    if 'screen' in UNITY_FPS: f.write(f"# UNITY_SCREEN_PTR\t{UNITY_FPS['screen'][0]:#x}\n# UNITY_SCREEN_SLOT\t{UNITY_FPS['screen'][1]:#x}\n# UNITY_SCREEN_REQ\t{UNITY_FPS['screen'][2]:#x}\n")   # Unity's screen manager and GetWidth's vtable slot (unity_fps.py; Wide view, hle_fpslock.c)
     if 'qs' in UNITY_FPS: f.write(''.join(f'# UNITY_QS_{k}\t{v:#x}\n' for k, v in zip(('PTR', 'IDX', 'ARR', 'SIZE', 'VSYNC'), UNITY_FPS['qs'])))   # its QualitySettings' vSyncCount (unity_fps.py)
     for n, o in UE_CVARS.items(): f.write(f'# UE_CVAR:{n}\t{o:#x}\n')   # Unreal console variables (ue_cvar.py): the TAutoConsoleVariable registered under each name
     if RENDER_SCALE:   # a render-scale stub reads state +0x10, up to this scale (the loader holds DM_RENDER_SCALE to it; dm/games/settings.py offers the setting up to it)

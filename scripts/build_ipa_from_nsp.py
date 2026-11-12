@@ -2215,6 +2215,10 @@ def split_shaders(py, repo, roms, mains, pkg, env, logs, g, provisional=False, o
     text = (logs / 'shader_split.log').read_text(errors='replace')
     m = re.search(r'shaders: (\d+) \(', text)
     bad = re.search(r'^\[RED\] (\d+) file\(s\) could not be read.*$', text, re.M)   # the split leaves out a file no reader reads (its own red line per file in the log) and goes on
+    if bad and not provisional:   # a file the profile names as unreadable (romfs_unreadable: damaged in the game or a mod's files, unreadable on the Switch too) is no reader change
+        known = {x.strip() for x in g.get('romfs_unreadable', '').split('|') if x.strip()}
+        each = re.findall(r'^\[RED\] (.+?): .* \(its shaders are left out\)$', text, re.M)
+        if each and known and set(each) <= known: say(f'{len(each)} file(s) the profile names as unreadable (romfs_unreadable) left out: {", ".join(each)}'); bad = None
     if bad and not provisional:   # the profile's tables were split from every file: one that does not read now is a reader change
         raise BuildError(f'{bad.group(0).removeprefix("[RED] ")}; the profile\'s tables hold every file\'s shaders (each file in {logs / "shader_split.log"})')
     if bad: say(f'{bad.group(0)}; the IPA goes without them (each file in {logs / "shader_split.log"})')

@@ -160,6 +160,14 @@ static void launcher_done(void) { [g_root startGame]; }
             setenv("DM_SCREEN_ASPECT", v, 1); LOG("front end: picture shape auto: window %.0fx%.0f points (%.3f:1) → DM_SCREEN_ASPECT=%s", sz.width, sz.height, r, v);
         }
     }
+    {   // Wide view "auto" (the launcher's Wide view on, hle_oe.c DM_WIDE_VIEW): the window's shape when it is wider than 16:9 (an iPhone's 19.5:9 in landscape), else 16:9 (an iPad)
+        const char *a = getenv("DM_WIDE_VIEW");
+        if (a && (!strcmp(a, "auto") || !strcmp(a, "1"))) {
+            CGSize sz = self.view.window ? self.view.window.bounds.size : UIScreen.mainScreen.bounds.size; double r = MAX(sz.width, sz.height) / MAX(MIN(sz.width, sz.height), 1);
+            char v[16]; if (r > 1.79) snprintf(v, sizeof v, "%.3f", fmin(r, 2.4)); else strcpy(v, "0");
+            setenv("DM_WIDE_VIEW", v, 1); LOG("front end: wide view auto: window %.0fx%.0f points (%.3f:1) → DM_WIDE_VIEW=%s", sz.width, sz.height, r, v);
+        }
+    }
     self.fill = dm_picture_fill(getenv("DM_PICTURE_FIT"));
     if (self.fill) LOG("front end: picture Fill (DM_PICTURE_FIT=fill), the 16:9 picture covers the screen in landscape and its edges are cropped");
     self.view.clipsToBounds = YES;   // with Fill the game view is larger than the screen
@@ -172,6 +180,7 @@ static void launcher_done(void) { [g_root startGame]; }
     self.pad = dm_gamepad_view(self.view.bounds);
     self.pad.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.pad];
+    dm_cheat_bubble_add(self.view);   // DmCheats.m: the cheats bubble over the pad, when the launcher's Cheats is on
     const char *fps = getenv("DM_SHOW_FPS");
     [self showFPS:fps ? atoi(fps) != 0 : [[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMShowFPS"] boolValue]];
     [self.view setNeedsLayout]; [self.view layoutIfNeeded];
@@ -204,6 +213,7 @@ static void launcher_done(void) { [g_root startGame]; }
     if (![line isEqualToString:self.layoutLog]) { self.layoutLog = line; LOG("front end: layout %s", line.UTF8String); }
     self.pad.frame = b;
     dm_gamepad_arrange(self.pad, layout);
+    dm_cheat_bubble_layout();
     if (self.fps) {   // the top row's free stretch: right of DmGamepad.m's L3 key (102 + 17 of its units from the safe edge), level with − / + (22 units down); u is its unit
         CGRect s = CGRectIntersection(layout.controls, UIEdgeInsetsInsetRect(b, gameInsets));
         CGFloat u = layout.separated ? MIN(MIN(s.size.height / 430.0, s.size.width / 700.0), 1.3) : MIN(b.size.height / 430.0, 1.3);

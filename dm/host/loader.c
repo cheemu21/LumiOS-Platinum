@@ -280,6 +280,9 @@ static void read_layout(module_t *m, const char *dir) {
         else if (!strcmp(key, "UNITY_QS_ARR")) m->unity_qs_arr = (uint32_t)v;
         else if (!strcmp(key, "UNITY_QS_SIZE")) m->unity_qs_size = (uint32_t)v;
         else if (!strcmp(key, "UNITY_QS_VSYNC")) m->unity_qs_vsync = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_SCREEN_PTR")) m->unity_screen_ptr = v;
+        else if (!strcmp(key, "UNITY_SCREEN_SLOT")) m->unity_screen_slot = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_SCREEN_REQ")) m->unity_screen_req = (uint32_t)v;
         else if (!strncmp(key, "UE_CVAR:", 8)) {
             if (m->n_ue_cvar == (int)(sizeof m->ue_cvar / sizeof *m->ue_cvar) || strlen(key + 8) >= sizeof m->ue_cvar[0].name) die("%s: too many Unreal console variables, or too long a name: %s", path, key);
             strcpy(m->ue_cvar[m->n_ue_cvar].name, key + 8); m->ue_cvar[m->n_ue_cvar++].off = v;
@@ -730,6 +733,53 @@ static uint8_t *jit_slot(module_t *m, uint64_t size, uint64_t pre) {
     return NULL;
 }
 
+// ---- Modules at a fixed distance (profile module_at, game.py module_at) ----
+// Horizon's loader lays a program's modules out one after another (4 KB aligned), so a module linked against that layout can reach another with PC-relative code: Luminescent
+// Platinum's subsdk1 (an exlaunch plugin for Pokémon Brilliant Diamond 1.3.0) makes 1,228 direct calls into main, its relocations point 116 times into main, and main's IPS patches branch
+// into it, all at main + 0x5708000. Here every module otherwise gets an address of its own, so the profile names the distance: when the anchor is mapped, address space for the follower
+// at that distance is reserved with it (address space only: nothing is committed), and the follower is mapped there. The follower and its patch areas must lie between the anchor's
+// end and the reservation's end, which the mapping checks
+#ifndef DM_GAME_MODULE_AT
+#define DM_GAME_MODULE_AT ""
+#endif
+#define FIXED_ROOM 0x4000000ull   // the follower's room past its base: its image, bss, key page and patch areas (subsdk1: about 7 MB)
+static struct { char name[16], anchor[16]; uint64_t off; } g_fix[8]; static int g_nfix = -1;
+static void fixed_init(void) {
+    if (g_nfix >= 0) return;
+    g_nfix = 0; const char *e = getenv("DM_MODULE_AT"); char buf[256]; strlcpy(buf, e ? e : DM_GAME_MODULE_AT, sizeof buf);   // DM_MODULE_AT: the profile's list, for bring-up
+    for (char *s = buf, *w; (w = strsep(&s, " ")) && g_nfix < 8;) {
+        char *eq = strchr(w, '='), *plus = eq ? strchr(eq, '+') : NULL; if (!eq || !plus) continue;
+        *eq = *plus = 0; strlcpy(g_fix[g_nfix].name, w, 16); strlcpy(g_fix[g_nfix].anchor, eq + 1, 16); g_fix[g_nfix].off = strtoull(plus + 1, NULL, 16);
+        if (!g_fix[g_nfix].off || g_fix[g_nfix].off & 0x3FFF) die("module_at %s: the offset must be a nonzero multiple of 16 KB", w);
+        LOG("module_at: %s at %s + %#llx", g_fix[g_nfix].name, g_fix[g_nfix].anchor, (unsigned long long)g_fix[g_nfix].off); g_nfix++;
+    }
+}
+static uint64_t fixed_span(module_t *m) {   // the address space an anchor reserves past its base: as far as its farthest follower's room; 0 for a module no follower names
+    fixed_init(); uint64_t span = 0;
+    for (int i = 0; i < g_nfix; i++) if (!strcmp(g_fix[i].anchor, m->name) && g_fix[i].off + FIXED_ROOM > span) span = g_fix[i].off + FIXED_ROOM;
+    return span;
+}
+static module_t *mod_named(const char *name) { for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, name)) return &g_mod[i]; return NULL; }
+// The follower's base: its anchor's base + the distance, checked to leave the anchor's image (and its patch areas) untouched and to fit in the reservation; NULL for a module no row names
+static uint8_t *fixed_slot(module_t *m, uint64_t size, uint64_t pre) {
+    fixed_init();
+    for (int i = 0; i < g_nfix; i++) if (!strcmp(g_fix[i].name, m->name)) {
+        module_t *a = mod_named(g_fix[i].anchor);
+        if (!a || !a->base) die("module_at: %s is placed from %s, which is not loaded before it", m->name, g_fix[i].anchor);
+        uint8_t *b = a->base + g_fix[i].off, *aend = a->base + a->size;
+        if (b - pre < aend) die("module_at: %s at %s + %#llx overlaps %s (%#llx bytes, %#llx of them before %s's base)", m->name, a->name, (unsigned long long)g_fix[i].off, a->name, (unsigned long long)a->size, (unsigned long long)pre, m->name);
+        if (size > FIXED_ROOM) die("module_at: %s (%#llx bytes) does not fit in its room", m->name, (unsigned long long)size);
+        LOG("module_at: %s at %p (%s + %#llx), %#llx bytes free between them", m->name, b, a->name, (unsigned long long)g_fix[i].off, (unsigned long long)(b - pre - aend));
+        return b;
+    }
+    return NULL;
+}
+static uint8_t *module_slot(module_t *m, uint64_t size, uint64_t pre) {   // where m goes when something decides it: the served JIT image's layout or module_at
+    uint8_t *j = jit_slot(m, size, pre), *f = fixed_slot(m, size, pre);
+    if (j && f) die("%s: both the JIT image's layout and module_at place it", m->name);
+    return j ? j : f;
+}
+
 
 #if TARGET_OS_IPHONE
 // iOS does not allow code loaded at run time to execute, and Apple allows an executable only one segment with execute permission (ITMS-90999): the image is compiled into this executable by dm/ios/tools/gen_embed.py --
@@ -789,9 +839,10 @@ static void map_image(module_t *m, const char *dir) {
     m->size = front ? m->image_size : m->patch_off + z1;
     uint64_t pre = front ? (uint64_t)-m->patch_off : 0;
     if (front) m->patch_len = z1;
-    vm_address_t base = 0; uint8_t *slot = jit_slot(m, m->size, pre);
-    if (slot) base = (vm_address_t)slot - pre;   // inside the jit layout's reservation
-    else if (vm_allocate(mach_task_self(), &base, pre + m->size, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) die("%s failed to reserve %#llx bytes of address space", m->name, (unsigned long long)(pre + m->size));
+    vm_address_t base = 0; uint8_t *slot = module_slot(m, m->size, pre); uint64_t span = fixed_span(m), want = pre + (m->size > span ? m->size : span);
+    if (slot) base = (vm_address_t)slot - pre;   // inside the jit layout's reservation, or its module_at anchor's
+    else if (vm_allocate(mach_task_self(), &base, want, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) die("%s failed to reserve %#llx bytes of address space", m->name, (unsigned long long)want);
+    if (span && !slot) LOG("module_at: %s reserves %#llx bytes past its base for the modules placed from it", m->name, (unsigned long long)span);
     base += pre;
     remap_at(m, base, x0, z0, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
     remap_at(m, base + z0, w, zw, TRUE, VM_PROT_READ | VM_PROT_WRITE);
@@ -811,6 +862,16 @@ static uint8_t *slurp(const char *path, size_t *n) {
     close(fd); *n = st.st_size; return p;
 }
 
+// A module_at anchor: reserve its image and its followers' room as one inaccessible range, and return where its base goes (the mmap with MAP_FIXED then maps the image over the
+// range's start); NULL for a module no follower names
+static uint8_t *fixed_reserve(module_t *m, uint64_t pre) {
+    uint64_t span = fixed_span(m); if (!span) return NULL;
+    uint8_t *r = mmap(NULL, pre + (m->size > span ? m->size : span), PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (r == MAP_FAILED) die("module_at: %s cannot reserve %#llx bytes", m->name, (unsigned long long)(pre + (m->size > span ? m->size : span)));
+    LOG("module_at: %s reserves %#llx bytes past its base for the modules placed from it", m->name, (unsigned long long)span);
+    return r + pre;
+}
+
 // Seal the code area immediately after copying into anonymous pages (16 KB pages): [0, text_end) and the patch area are read-only+execute, and from then on any write to the code area crashes on the spot;
 // what lies between (ro and data on the same page can only go together) is writable
 static void map_image(module_t *m, const char *dir) {
@@ -823,7 +884,8 @@ static void map_image(module_t *m, const char *dir) {
         if (sz < fl + bl) die("%s is shorter than FILE_IMAGE_LEN %#llx + BACK_LEN %#llx", path, (unsigned long long)fl, (unsigned long long)bl);
         m->size = m->image_size; m->patch_len = (sz - bl - fl + 0x3FFF) & ~0x3FFFull;
         if (m->patch_len > pre) die("%s patch area of %#llx bytes does not fit in the %#llx before the base", path, (unsigned long long)m->patch_len, (unsigned long long)pre);
-        uint8_t *slot = jit_slot(m, m->size, pre);
+        uint8_t *slot = module_slot(m, m->size, pre);
+        if (!slot) slot = fixed_reserve(m, pre);
         uint8_t *a = mmap(slot ? slot - pre : NULL, pre + m->size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | (slot ? MAP_FIXED : 0), -1, 0);
         if (a == MAP_FAILED) die("%s mmap %#llx", m->name, (unsigned long long)(pre + m->size));
         m->base = a + pre;
@@ -837,7 +899,8 @@ static void map_image(module_t *m, const char *dir) {
         return;
     }
     m->size = (sz + 0x3FFF) & ~0x3FFFull;
-    uint8_t *slot = jit_slot(m, m->size, 0);
+    uint8_t *slot = module_slot(m, m->size, 0);
+    if (!slot) slot = fixed_reserve(m, 0);
     m->base = mmap(slot, m->size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | (slot ? MAP_FIXED : 0), -1, 0);
     if (m->base == MAP_FAILED) die("%s mmap", m->name);
     memcpy(m->base, raw, sz); free(raw); install_key_page(m);

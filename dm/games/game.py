@@ -152,6 +152,18 @@ def header_multi(progs):
     return '\n'.join(L + [''])
 
 
+def module_at(g, mods):
+    """module_at: <module>=<anchor>+<offset> ... (loader.c module_slot): a module placed at a fixed distance from another, as Horizon's loader lays modules out one after another;
+    an exlaunch-style plugin that a mod adds (Luminescent Platinum's subsdk1) calls into main at the distance it was linked for. The offset must be on a 16 KB page"""
+    out = []
+    for w in g.words('module_at') if g.get('module_at', '') else []:
+        m = re.fullmatch(r'(\w+)=(\w+)\+(0x[0-9a-fA-F]+)', w)
+        if not m or m[1] == m[2] or int(m[3], 16) % 0x4000 or not int(m[3], 16): sys.exit(f'{g.id}: module_at takes <module>=<anchor>+<offset on a 16 KB page>: {w}')
+        if mods.index(m[2]) > mods.index(m[1]) if m[1] in mods and m[2] in mods else False: sys.exit(f'{g.id}: module_at: {m[2]} must load before {m[1]}')
+        out.append(w)
+    return ' '.join(out)
+
+
 def header_one(g):
     """the host's game_profile.h: the profile constants the host uses, as macros"""
     q = lambda s: '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
@@ -185,7 +197,7 @@ def header_one(g):
     sf = g.get('shared_font', 'bfttf')   # what the shared-font address points at (hle_sdk16.c): bfttf = 8-byte header + TTF, ttf = the TTF alone
     if sf not in ('bfttf', 'ttf'): sys.exit(f'{g.id}: shared_font must be bfttf or ttf: {sf}')
     pl = g.get('pad_layout', 'simple')   # the virtual gamepad's first layout (DmGamepad.m; afterwards whatever the player switched to in game is kept): simple = 2D, full = 3D (D-pad, right stick, L3 / R3),
-    if pl not in ('simple', 'full', 'touch'): sys.exit(f'{g.id}: pad_layout must be simple, full or touch: {pl}')   # touch = Tap (no control: every touch goes to the game's touch screen)
+    if pl not in ('simple', 'full', 'touch', 'brilliant'): sys.exit(f'{g.id}: pad_layout must be simple, full, touch or brilliant: {pl}')   # touch = Tap (no control: every touch goes to the game's touch screen); brilliant = Pokémon Brilliant Diamond's keys (DmGamepad.m)
     sks = g.get('shader_key_skip', '')   # control-section bytes the shader keys hash as zeros, <offset>+<length> (hle_nvn.c keys_hash, shader_split.py key_ctl; Batman: Arkham Knight: GLSLC's compile information, 0x770+0x78)
     m = re.fullmatch(r'(0x[0-9a-fA-F]+|\d+)\+(0x[0-9a-fA-F]+|\d+)', sks) if sks else None
     if sks and (not m or not 0x30 <= int(m[1], 0) or not 0 < int(m[2], 0) or int(m[1], 0) + int(m[2], 0) > 0x880 or (int(m[1], 0) < 0x760 and int(m[1], 0) + int(m[2], 0) > 0x700)):   # not over +0x700..+0x75f, the code area and compute fields the tools read
@@ -222,6 +234,7 @@ def header_one(g):
          f'#define DM_GAME_PROGRAM_ID 0x{int(g.get("program_id"), 16):016X}ull',
          f'#define DM_GAME_MODULES {{{", ".join(map(q, mods))}}}',
          f'#define DM_GAME_NMOD {len(mods)}',
+         f'#define DM_GAME_MODULE_AT {q(module_at(g, mods))}',
          # each build's own modules (main.c picks the row of main's build ID, else DM_GAME_MODULES): a version may lack a module another has
          f'#define DM_GAME_BUILD_MODULES {", ".join("{" + q(bid) + ", " + q(" ".join(ms)) + "}" for bid, ms in g.build_modules().items()) or "{0}"}',
          f'#define DM_GAME_ROMFS_MARKER {q(g.get("romfs_marker"))}',
@@ -236,7 +249,9 @@ def header_one(g):
          f'#define DM_GAME_LAUNCH_PARAM {q(g.get("launch_param", ""))}',   # what oe::TryPopLaunchParameter hands over once (hle_oe.c; a program another program of the application launches: Super Mario 3D All-Stars)
          f'#define DM_GAME_MEM_MAP_LIMIT {int(mml == "on")}',
          f'#define DM_GAME_STDALLOC_CAP {int(g.get("stdalloc_cap", "0"), 0):#x}ull',   # StandardAllocator's address space with virtual address memory (hle_svc.c); 0 = what the alias region has room for
-         f'#define DM_GAME_SCREEN_ASPECT {("off", "on").index(g.get("screen_aspect", "off"))}',   # stubs that follow a screen taller than 16:9 (DM_SCREEN_ASPECT): off / on
+         f'#define DM_GAME_SCREEN_ASPECT {("off", "on").index(g.get("screen_aspect", "off"))}',
+         f'#define DM_GAME_WIDE_VIEW {("off", "on").index(g.get("wide_view", "off"))}',   # the game draws a display wider than 16:9 in its own shape (hle_oe.c DM_WIDE_VIEW): off / on
+         f'#define DM_GAME_CHEAT_BUBBLE {("off", "on").index(g.get("cheat_bubble", "off"))}',   # the iOS cheats bubble (DmCheats.m) is offered: off / on   # stubs that follow a screen taller than 16:9 (DM_SCREEN_ASPECT): off / on
          f'#define DM_GAME_DISPLAY_VERSIONS {vers}',
          f'#define DM_GAME_PRESENT_DISPLAY {int(pi == "display")}',
          f'#define DM_GAME_CORE_PREEMPT {int(cp == "on")}',
@@ -250,7 +265,7 @@ def header_one(g):
          f'#define DM_GAME_PSO_MTL4 {int(p4 == "on")}',
          f'#define DM_GAME_ENC_THREAD {int(et == "on")}',
          *([f'#define DM_GAME_SHARED_FONT_TTF {int(sf == "ttf")}'] if g.get('shared_font', '') else []),   # without the key the host decides by the SDK version (hle_sdk16.c)
-         f'#define DM_GAME_PAD_LAYOUT {("simple", "full", "touch").index(pl)}',
+         f'#define DM_GAME_PAD_LAYOUT {("simple", "full", "touch", "brilliant").index(pl)}',
          f'#define DM_GAME_OPMODE {int(om == "console")}',
          f'#define DM_GAME_PERF_BOOST {int(pm == "boost")}',
          f'#define DM_GAME_TEX_FLUSH_UPLOAD {int(tfu == "on")}',

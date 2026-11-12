@@ -7,6 +7,11 @@
 //   3D (full, Pro Controller style): everything in 2D (left stick and diamond keep their place and size), plus a D-pad (inward of and below the left stick, 8-way), a right stick that is not drawn
 //     (a touch landing in the right third of the screen on no control holds it: centred where it lands, the centre dragged along once the finger passes the stick radius) and L3 / R3 (small round keys in the top row, inward of ZL / ZR).
 //     Breath of the Wild crouches with L3 and uses the scope with R3; 3D World and Breath of the Wild turn the camera with the right stick.
+//   Brilliant (profile pad_layout brilliant; Pokémon Brilliant Diamond's buttons): plain translucent keys, each with a symbol of what it does and a small mark at its top right naming the Switch button.
+//     A (✓) is the large key under the right thumb; B (↩), Y (⇄), X (☰) and + (☆, registered key items) sit on an arc around it. L and ZL are pills at the top left; R (the Pokétch) and ZR are pills
+//     below the top-right corner, which stays free because the game shows the Pokétch there and takes touches on it (handheld mode). − sits left of the menu button. The left stick floats: a touch in its
+//     area (an L around the D-pad's own square, below and right of it) centres the stick where it lands; the D-pad (larger, 8-way) is above and left of it, and a touch that starts in one area never acts on the other.
+//     The knob is a Poké Ball in the same colourless glass.
 //   Touch-down ownership: the menu button where it is nearer than a locked key (a view of its own, DmMenuButton), locked keys next (shoulders, − / +, L3 / R3), then whichever of the diamond, the D-pad and the left stick has the smallest distance / grab radius (the left stick's grab circle borders the D-pad),
 //     then in 3D the right stick for a touch in the right third.
 //   Everything hugs the edges and corners to leave the picture room; controls sit over the picture, one CAShapeLayer each: a press only swaps the fill, a stick only moves its knob, nothing redraws the whole screen.
@@ -128,9 +133,21 @@ static const CGFloat
     K_DPAD_GRAB = 1.3,                              // D-pad grab radius (times the outer edge)
     K_RSTICK_R = 60,                                // right stick (not drawn): radius around its centre, the touch-down point
     K_RSWIPE = 1.0 / 3,                             // right stick area: this fraction of the screen width from the right edge (not in u)
-    K_CLICK_X = 102, K_CLICK_R = 17;                // L3 / R3: centre from the outer edge (level with ZL / ZR), radius
-static const int k_btns[] = {B_ZL, B_L, B_ZR, B_R, B_MINUS, B_PLUS, B_LS, B_RS};   // keys locked at touch-down (L3 / R3 only in the 3D layout)
-static NSString *const k_layout_key = @"DmPadLayout";   // NSUserDefaults: 0 = 2D, 1 = 3D, 2 = Tap (DM_GAME_PAD_LAYOUT's numbers)
+    K_CLICK_X = 102, K_CLICK_R = 17,                // L3 / R3: centre from the outer edge (level with ZL / ZR), radius
+    // the Brilliant layout (x from the corner rectangle's outer edge, y from its bottom, unless noted)
+    K_BD_A_X = 71, K_BD_A_Y = 87, K_BD_A_R = 34,    // A: centre, radius
+    K_BD_ARC = 90, K_BD_KEY_R = 25,                 // B, Y, X, +: distance from A's centre, radius
+    K_BD_DPAD_X = 125, K_BD_DPAD_Y = 223, K_BD_DPAD_R = 49, K_BD_DPAD_BOX = 60,   // D-pad: centre, arm outer edge, half side of its own touch square
+    K_BD_STICK_X = 255, K_BD_STICK_Y = 91, K_BD_STICK_R = 60, K_BD_KNOB_R = 28,  // the stick's resting place (where it is drawn untouched), ring and knob
+    K_BD_AREA_IN = 37, K_BD_AREA_OUT = 133, K_BD_GAP = 8,   // the stick area: from this far in from the outer edge to this far right of the resting centre; kept this far off the D-pad's square
+    K_BD_PILL_W = 70, K_BD_PILL_H = 32, K_BD_ZPILL_W = 58, K_BD_ZPILL_H = 26,   // L / R and ZL / ZR pills (x / y from the safe area)
+    K_BD_L_X = 61, K_BD_ZL_X = 146, K_BD_LZ_Y = 43, // L and ZL: centres from the safe area's outer edge, from its top
+    K_BD_R_X = 97, K_BD_ZR_X = 185, K_BD_RZ_Y = 141,// R and ZR: likewise, below the Pokétch's corner
+    K_BD_MINUS_DX = 49, K_BD_MINUS_W = 42, K_BD_MINUS_H = 26,   // −: left of the menu button
+    K_BD_BADGE_H = 16;                              // the button mark: height (points, at u = 1)
+static const int k_btns[] = {B_ZL, B_L, B_ZR, B_R, B_MINUS, B_PLUS, B_LS, B_RS};   // keys locked at touch-down (L3 / R3 only in the 3D layout; + is a round key of the arc in Brilliant)
+static const int k_bd_face[] = {B_A, B_B, B_Y, B_X, B_PLUS};   // the Brilliant layout's arc keys, A first
+static NSString *const k_layout_key = @"DmPadLayout";   // NSUserDefaults: 0 = 2D, 1 = 3D, 2 = Tap, 3 = Brilliant (DM_GAME_PAD_LAYOUT's numbers)
 int dm_opmode(void);   // hle_oe.c: 0 = handheld
 
 @interface DmGamepad : UIView
@@ -159,7 +176,13 @@ static void pads_start(void);   // Physical controllers, below
     UIImpactFeedbackGenerator *_touchFeedback;       // one short feedback per touch-control press edge
     unsigned _hapticSticks;
     BOOL _stickShown;                              // the left stick was held at the last refresh
-    BOOL _full, _tap;                              // the 3D layout / the Tap layout is current
+    BOOL _full, _tap, _bd;                         // the 3D layout / the Tap layout / the Brilliant layout is current
+    CALayer *_icon[B_N];                           // Brilliant: each key's symbol (an image layer), its button mark and the line under it
+    CAShapeLayer *_badge[B_N]; CATextLayer *_badgeText[B_N], *_sub[B_N];
+    CGImageRef _iconImg[B_N][2];                   // the symbol drawn light (idle) and dark (pressed), made for the current size
+    CGFloat _iconSize;
+    CAShapeLayer *_ballTop, *_ballBand, *_ballButton;   // Brilliant: the knob drawn as a Poké Ball
+    CGPoint _lCentre;                              // Brilliant: the floating stick's centre, where its touch landed (dragged along past the ring)
     CALayer *_controls;                            // holds every control layer: hidden while a physical controller is connected (the view itself stays, for game touches)
     BOOL _padOff;                                  // a physical controller is connected: every touch goes to the game
     DmLayout _layout;
@@ -179,6 +202,22 @@ static CATextLayer *label(CALayer *parent, NSString *s) {
     [parent addSublayer:t]; return t;
 }
 static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   // keys shown only in the 3D layout
+// Brilliant: each key's SF Symbol (what it does in Brilliant Diamond) and the line under it; nil for keys that carry text or nothing
+static NSString *bdIcon(int b) {
+    switch (b) {
+        case B_A: return @"checkmark"; case B_B: return @"arrow.uturn.backward"; case B_X: return @"line.3.horizontal"; case B_Y: return @"arrow.left.arrow.right";
+        case B_PLUS: return @"star"; case B_L: return @"chevron.left"; case B_R: return @"applewatch";
+        case B_ZL: case B_ZR: case B_MINUS: return @"";   // text keys: a layer set exists so the code below treats every Brilliant key alike
+        default: return nil;
+    }
+}
+static NSString *bdSub(int b) {
+    switch (b) {
+        case B_A: return @"OK / talk"; case B_B: return @"back · hold: run"; case B_X: return @"menu"; case B_Y: return @"swap"; case B_PLUS: return @"shortcuts";
+        case B_L: return @"page"; case B_R: return @"Pokétch"; default: return nil;
+    }
+}
+static BOOL bdArc(int b) { return b == B_A || b == B_B || b == B_X || b == B_Y || b == B_PLUS; }
 
 - (instancetype)initWithFrame:(CGRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -209,6 +248,17 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
             _key[b] = shape(_controls);
             if (names[b]) _label[b] = label(_key[b], names[b]);   // the D-pad arms carry no label
         }
+        for (int b = 0; b < B_N; b++) if (bdIcon(b)) {   // Brilliant: symbol, button mark, line under the key (hidden in the other layouts)
+            _icon[b] = [CALayer layer]; _icon[b].contentsGravity = kCAGravityResizeAspect; [_key[b] addSublayer:_icon[b]];
+            _badge[b] = [CAShapeLayer layer]; _badge[b].lineWidth = 1; [_key[b] addSublayer:_badge[b]];
+            _badgeText[b] = label(_badge[b], names[b]);
+            if (bdSub(b)) { _sub[b] = label(_key[b], bdSub(b)); _sub[b].foregroundColor = [UIColor colorWithWhite:1 alpha:0.85].CGColor;
+                _sub[b].shadowColor = UIColor.blackColor.CGColor; _sub[b].shadowOpacity = 0.6; _sub[b].shadowRadius = 1.5; _sub[b].shadowOffset = CGSizeZero; }
+        }
+        _ballTop = [CAShapeLayer layer]; _ballTop.fillColor = [UIColor colorWithWhite:1 alpha:0.5].CGColor; _ballTop.strokeColor = nil;
+        _ballBand = [CAShapeLayer layer]; _ballBand.fillColor = nil; _ballBand.strokeColor = [UIColor colorWithWhite:0.17 alpha:0.55].CGColor;
+        _ballButton = [CAShapeLayer layer]; _ballButton.fillColor = [UIColor colorWithWhite:1 alpha:0.85].CGColor; _ballButton.strokeColor = [UIColor colorWithWhite:0.17 alpha:0.55].CGColor;
+        for (CAShapeLayer *l in @[_ballTop, _ballBand, _ballButton]) [_knob addSublayer:l];
         _menu = [DmMenuButton buttonWithType:UIButtonTypeCustom];
         _menu.backgroundColor = k_idle; _menu.layer.borderColor = k_line.CGColor; _menu.layer.borderWidth = 1.5;
         _menu.layer.shadowColor = UIColor.blackColor.CGColor; _menu.layer.shadowOpacity = 0.2; _menu.layer.shadowRadius = 3; _menu.layer.shadowOffset = CGSizeMake(0, 1);
@@ -220,7 +270,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         NSNumber *saved = [NSUserDefaults.standardUserDefaults objectForKey:k_layout_key];
         int l = saved ? (int)saved.integerValue : DM_GAME_PAD_LAYOUT;
         if (l == 2 && dm_opmode() != 0) l = 0;   // Tap only in handheld mode (env.txt's DM_OPMODE may have changed it)
-        _full = l == 1; _tap = l == 2;
+        _full = l == 1; _tap = l == 2; _bd = l == 3;
         [self applyLayout];
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
         [nc addObserver:self selector:@selector(padsChanged:) name:GCControllerDidConnectNotification object:nil];
@@ -234,21 +284,27 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
 }
 - (void)applyLayout {   // show / hide the controls for the current layout
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    for (int b = 0; b < B_N; b++) _key[b].hidden = _tap || (fullOnly(b) && !_full);
+    for (int b = 0; b < B_N; b++) {
+        _key[b].hidden = _tap || (fullOnly(b) && !_full && !(_bd && b >= B_LEFT));   // Brilliant shows the D-pad, not L3 / R3
+        if (_label[b]) _label[b].hidden = _bd && _icon[b] != nil && b != B_ZL && b != B_ZR && b != B_MINUS;   // its keys show symbols; ZL, ZR and − keep their text
+        if (_icon[b]) { _icon[b].hidden = !_bd || b == B_ZL || b == B_ZR || b == B_MINUS; _badge[b].hidden = !_bd || b == B_MINUS || b == B_ZL || b == B_ZR; _sub[b].hidden = !_bd; }
+    }
     _ring.hidden = _knob.hidden = _tap;
+    _ballTop.hidden = _ballBand.hidden = _ballButton.hidden = !_bd;
+    ((CALayer *)_knob.sublayers.firstObject).hidden = _bd;   // the plain knob's inner ring
     [CATransaction commit];
 }
-- (int)padLayout { return _tap ? 2 : _full ? 1 : 0; }
+- (int)padLayout { return _bd ? 3 : _tap ? 2 : _full ? 1 : 0; }
 - (void)setPadLayout:(int)l {   // the in-game menu's pick: release every touch first (no key stays held), save, lay out again
     if (l == 2 && dm_opmode() != 0) l = 0;
     [self reset];
-    _full = l == 1; _tap = l == 2;
+    _full = l == 1; _tap = l == 2; _bd = l == 3;
     [NSUserDefaults.standardUserDefaults setObject:@(l) forKey:k_layout_key];
     [self applyLayout]; [self setNeedsLayout];
 }
 - (void)opmodeChanged {   // docked: the Tap layout goes (the game reads no touch screen then), unsaved, so handheld mode at the next start brings it back
     if (!_tap || dm_opmode() == 0) return;
-    [self reset]; _tap = NO; _full = NO; [self applyLayout]; [self setNeedsLayout];
+    [self reset]; _tap = NO; _full = NO; _bd = DM_GAME_PAD_LAYOUT == 3; [self applyLayout]; [self setNeedsLayout];
 }
 - (void)setTouchFeedback:(BOOL)on {
     if (!on) { _touchFeedback = nil; return; }
@@ -279,7 +335,15 @@ static CGPoint side(CGRect s, int right, CGFloat dx, CGFloat y) { return CGPoint
 - (CGFloat)faceGap { return K_FACE_GAP * self.u; }
 - (CGFloat)faceR { return K_FACE_R * self.u; }
 - (CGFloat)faceHitR { return MAX(self.faceR * 1.25, _layout.separated ? 22 : 0); }
+- (CGPoint)bdA { CGRect s = self.corner; CGFloat u = self.u; return side(s, 1, K_BD_A_X * u, CGRectGetMaxY(s) - K_BD_A_Y * u); }
+- (CGFloat)keyR:(int)b { return !_bd ? self.faceR : (b == B_A ? K_BD_A_R : K_BD_KEY_R) * self.u; }
+- (CGFloat)keyHitR:(int)b { return MAX([self keyR:b] * 1.25, 22); }
 - (CGPoint)facePos:(int)b { CGPoint c = self.faceCenter; CGFloat g = self.faceGap;
+    if (_bd) {   // A, then B, Y, X and + on an arc around it, from the thumb's rest (lower left) up to the top
+        CGPoint a = self.bdA; if (b == B_A) return a;
+        CGFloat deg = b == B_B ? 165 : b == B_Y ? 205 : b == B_X ? 245 : 285, r = K_BD_ARC * self.u;
+        return CGPointMake(a.x + r * cos(deg * M_PI / 180), a.y + r * sin(deg * M_PI / 180));
+    }
     switch (b) { case B_A: return CGPointMake(c.x + g, c.y); case B_B: return CGPointMake(c.x, c.y + g); case B_X: return CGPointMake(c.x, c.y - g); default: return CGPointMake(c.x - g, c.y); } }
 - (CGPoint)stickHome {
     if (self.portraitControls) {
@@ -288,10 +352,18 @@ static CGPoint side(CGRect s, int right, CGFloat dx, CGFloat y) { return CGPoint
         return p;
     }
     CGRect s = self.corner;
+    if (_bd) return side(s, 0, K_BD_STICK_X * self.u, CGRectGetMaxY(s) - K_BD_STICK_Y * self.u);
     return side(s, 0, K_STICK_X * self.u, CGRectGetMaxY(s) - K_PAD_Y * self.u);
 }
-- (CGPoint)stickCentre:(int)i { return i ? _rCentre : self.stickHome; }
-- (CGFloat)stickR:(int)i { return (i ? K_RSTICK_R : K_STICK_R) * self.u; }
+- (CGPoint)stickCentre:(int)i { return i ? _rCentre : (_bd && _stick[0]) ? _lCentre : self.stickHome; }
+- (CGFloat)stickR:(int)i { return (i ? K_RSTICK_R : _bd ? K_BD_STICK_R : K_STICK_R) * self.u; }
+- (CGRect)bdDpadBox { CGPoint c = self.dpadCenter; CGFloat h = K_BD_DPAD_BOX * self.u; return CGRectMake(c.x - h, c.y - h, 2 * h, 2 * h); }
+- (BOOL)inBdStickArea:(CGPoint)p {   // the stick's area: an L below and right of the D-pad's square, kept K_BD_GAP off it, so a touch starting in one never acts on the other
+    CGRect s = self.corner, box = self.bdDpadBox; CGFloat u = self.u;
+    CGFloat x0 = CGRectGetMinX(s) + K_BD_AREA_IN * u, x1 = self.stickHome.x + K_BD_AREA_OUT * u, y0 = CGRectGetMinY(box), y1 = CGRectGetMaxY(s);
+    if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) return NO;
+    return !CGRectContainsPoint(CGRectInset(box, -K_BD_GAP * u, -K_BD_GAP * u), p);
+}
 - (BOOL)inRightArea:(CGPoint)p { CGRect b = _layout.controls; return p.x >= CGRectGetMaxX(b) - b.size.width * K_RSWIPE; }
 - (CGPoint)dpadCenter {
     if (self.portraitControls) {
@@ -300,9 +372,10 @@ static CGPoint side(CGRect s, int right, CGFloat dx, CGFloat y) { return CGPoint
         return p;
     }
     CGRect s = self.corner; CGFloat u = self.u;
+    if (_bd) return side(s, 0, K_BD_DPAD_X * u, CGRectGetMaxY(s) - K_BD_DPAD_Y * u);
     return side(s, 0, K_LOW_X * u, CGRectGetMaxY(s) - K_LOW_Y * u);
 }
-- (CGFloat)dpadR { return K_DPAD_R * self.u; }
+- (CGFloat)dpadR { return (_bd ? K_BD_DPAD_R : K_DPAD_R) * self.u; }
 static BOOL isDrop(int b) { return b == B_ZL || b == B_L || b == B_ZR || b == B_R; }
 static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 - (CGPoint)dropCenter:(int)b { CGRect s = self.safe; CGFloat u = self.u; BOOL z = b == B_ZL || b == B_ZR;
@@ -311,7 +384,15 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 - (CGFloat)dropR:(int)b { return (b == B_ZL || b == B_ZR ? K_ZL_R : K_L_R) * self.u; }
 - (CGPoint)clickCenter:(int)b { CGRect s = self.safe; CGFloat u = self.u; CGFloat edge = _layout.separated ? 22 : 0;
     return side(s, b == B_RS, MAX(K_CLICK_X * u, edge), CGRectGetMinY(s) + MAX(K_ZL_Y * u, edge)); }
-- (CGRect)pillRect:(int)b { CGRect s = self.safe; CGFloat u = self.u, w = K_PILL_W * u, h = K_PILL_H * u;
+- (CGRect)bdPill:(int)b {   // Brilliant: L / ZL at the top left, R / ZR below the Pokétch's corner, − left of the menu button
+    CGRect s = self.safe; CGFloat u = self.u, w, h, x, y;
+    if (b == B_MINUS) { w = K_BD_MINUS_W * u; h = K_BD_MINUS_H * u; x = CGRectGetMidX(s) - K_BD_MINUS_DX * u; y = self.menuCenter.y; }
+    else { BOOL z = b == B_ZL || b == B_ZR, right = b == B_R || b == B_ZR;
+        w = (z ? K_BD_ZPILL_W : K_BD_PILL_W) * u; h = (z ? K_BD_ZPILL_H : K_BD_PILL_H) * u;
+        CGPoint c = side(s, right, (right ? (z ? K_BD_ZR_X : K_BD_R_X) : (z ? K_BD_ZL_X : K_BD_L_X)) * u, CGRectGetMinY(s) + (right ? K_BD_RZ_Y : K_BD_LZ_Y) * u); x = c.x; y = c.y; }
+    return CGRectMake(x - w / 2, y - h / 2, w, h);
+}
+- (CGRect)pillRect:(int)b { if (_bd) return [self bdPill:b]; CGRect s = self.safe; CGFloat u = self.u, w = K_PILL_W * u, h = K_PILL_H * u;
     CGPoint c = CGPointMake(CGRectGetMidX(s) + (b == B_PLUS ? K_PILL_DX : -K_PILL_DX) * u, CGRectGetMinY(s) + MAX(K_PILL_Y * u, _layout.separated ? 14 : 0));   // − on the left, + on the right
     return CGRectMake(c.x - w / 2, c.y - h / 2, w, h); }
 - (CGPoint)menuCenter { CGRect s = self.safe; return CGPointMake(CGRectGetMidX(s), CGRectGetMinY(s) + MAX(K_PILL_Y * self.u, _layout.separated ? 14 : 0)); }
@@ -319,7 +400,8 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); }
 - (CGFloat)buttonDistance:(int)b point:(CGPoint)p {
     CGFloat u = self.u;
-    if (isDrop(b)) return dist(p, [self dropCenter:b]) / MAX([self dropR:b] * 1.35, _layout.separated ? 22 : 0);
+    if (_bd && b == B_PLUS) return CGFLOAT_MAX;   // an arc key in Brilliant (faceAt)
+    if (isDrop(b) && !_bd) return dist(p, [self dropCenter:b]) / MAX([self dropR:b] * 1.35, _layout.separated ? 22 : 0);
     if (isClick(b)) return dist(p, [self clickCenter:b]) / MAX(K_CLICK_R * u * 1.35, _layout.separated ? 22 : 0);
     CGRect r = CGRectInset([self pillRect:b], -8 * u, -8 * u);
     if (!_layout.separated && !CGRectContainsPoint(r, p)) return CGFLOAT_MAX;
@@ -345,7 +427,14 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     int hit = [self btnAt:p];
     return hit < 0 || d < [self buttonDistance:hit point:p];
 }
+- (CGFloat)faceGrab:(CGPoint)p {   // how near the face keys a touch-down is (<= 1 takes them): the diamond's circle, or in Brilliant the nearest arc key's enlarged hit circle
+    if (!_bd) return dist(p, self.faceCenter) / (self.faceGap + MAX(self.faceR * 1.6, self.faceHitR));
+    CGFloat best = CGFLOAT_MAX;
+    for (int i = 0; i < 5; i++) { int b = k_bd_face[i]; best = MIN(best, dist(p, [self facePos:b]) / ([self keyHitR:b] * 1.3)); }
+    return best;
+}
 - (uint64_t)faceAt:(CGPoint)p {   // keys under the finger in the diamond (between two keys both count)
+    if (_bd) { uint64_t m = 0; for (int i = 0; i < 5; i++) { int b = k_bd_face[i]; if (dist(p, [self facePos:b]) <= [self keyHitR:b]) m |= 1ull << b; } return m; }
     uint64_t m = 0; CGFloat r = self.faceHitR;
     for (int b = B_A; b <= B_Y; b++) if (dist(p, [self facePos:b]) <= r) m |= 1ull << b;
     return m;
@@ -420,7 +509,8 @@ int front_web_touch(void);
     if (_padOff || (_layout.separated && !CGRectContainsPoint(_layout.controls, p))) return NO;
     if (_tap) return NO;
     if ([self btnAt:p] >= 0) return YES;
-    if (dist(p, self.faceCenter) / (self.faceGap + MAX(self.faceR * 1.6, self.faceHitR)) <= 1) return YES;
+    if ([self faceGrab:p] <= 1) return YES;
+    if (_bd) return CGRectContainsPoint(self.bdDpadBox, p) || (!_stick[0] && [self inBdStickArea:p]);
     if (_full && dist(p, self.dpadCenter) / MAX(self.dpadR * K_DPAD_GRAB, _layout.separated ? 22 : 0) < 1) return YES;
     if (!_stick[0] && dist(p, self.stickHome) / MAX([self stickR:0] * K_STICK_GRAB, _layout.separated ? 22 : 0) < 1) return YES;
     return _full && !_stick[1] && [self inRightArea:p];
@@ -440,7 +530,12 @@ int front_web_touch(void);
         if (_tap) { game |= [self gameBegin:t]; continue; }
         // diamond, D-pad, left stick: take the one with the smallest distance / grab radius, if it is <= 1
         CGFloat best = 1; int kind = C_NONE, idx = 0;
-        CGFloat f = dist(p, self.faceCenter) / (self.faceGap + MAX(self.faceR * 1.6, self.faceHitR)); if (f <= best) { best = f; kind = C_FACE; }
+        CGFloat f = [self faceGrab:p]; if (f <= best) { best = f; kind = C_FACE; }
+        if (_bd && kind == C_NONE) {   // Brilliant: the D-pad's square, else the stick's area (the stick centres where the touch lands); never both
+            if (CGRectContainsPoint(self.bdDpadBox, p)) kind = C_DPAD;
+            else if (!_stick[0] && [self inBdStickArea:p]) { kind = C_STICK; _lCentre = p; }
+        }
+        if (_bd) best = 0;   // the areas decided it: the generic checks below do not run
         if (_full) { CGFloat d = dist(p, self.dpadCenter) / MAX(self.dpadR * K_DPAD_GRAB, _layout.separated ? 22 : 0); if (d < best) { best = d; kind = C_DPAD; } }
         if (!_stick[0]) { CGFloat s = dist(p, self.stickHome) / MAX([self stickR:0] * K_STICK_GRAB, _layout.separated ? 22 : 0); if (s < best) { best = s; kind = C_STICK; } }
         if (kind == C_NONE && _full && !_stick[1] && [self inRightArea:p]) { kind = C_STICK; idx = 1; _rCentre = p; }   // the right stick: centred where the touch lands
@@ -459,7 +554,9 @@ int front_web_touch(void);
         if (c == C_FACE) [_faceOf setObject:@([self faceAt:p]) forKey:t];
         else if (c == C_STICK) { _stickNow[v >> 8] = p;
             if ((v >> 8) == 1) { CGFloat d = dist(p, _rCentre), R = [self stickR:1];   // the right stick's centre follows a finger past its radius, so turning back responds at once
-                if (d > R) _rCentre = CGPointMake(p.x - (p.x - _rCentre.x) * R / d, p.y - (p.y - _rCentre.y) * R / d); } }
+                if (d > R) _rCentre = CGPointMake(p.x - (p.x - _rCentre.x) * R / d, p.y - (p.y - _rCentre.y) * R / d); }
+            else if (_bd) { CGFloat d = dist(p, _lCentre), R = [self stickR:0];   // Brilliant's floating stick likewise
+                if (d > R) _lCentre = CGPointMake(p.x - (p.x - _lCentre.x) * R / d, p.y - (p.y - _lCentre.y) * R / d); } }
         else if (c == C_GAME) game = YES;
     }
     if (game) [self pushGame];
@@ -519,9 +616,13 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
         _label[b].contentsScale = scale; [_label[b] setNeedsDisplay];
     }
     _controls.frame = self.layer.bounds;
-    for (int b = B_A; b <= B_Y; b++) { CGPoint c = [self facePos:b]; setPath(_key[b], circlePath(c, self.faceR)); placeLabel(_label[b], c, 20 * u); }
+    for (int b = B_A; b <= B_Y; b++) { CGPoint c = [self facePos:b]; setPath(_key[b], circlePath(c, [self keyR:b])); placeLabel(_label[b], c, 20 * u); }
     for (int i = 0; i < (int)(sizeof k_btns / sizeof *k_btns); i++) { int b = k_btns[i];
-        if (isDrop(b)) {
+        if (_bd && b == B_PLUS) { CGPoint c = [self facePos:b]; setPath(_key[b], circlePath(c, [self keyR:b])); placeLabel(_label[b], c, 18 * u); }
+        else if (_bd && (isDrop(b) || b == B_MINUS)) {
+            CGRect rc = [self pillRect:b];
+            setPath(_key[b], CGPathCreateWithRoundedRect(rc, rc.size.height / 2, rc.size.height / 2, NULL)); placeLabel(_label[b], CGPointMake(CGRectGetMidX(rc), CGRectGetMidY(rc)), (b == B_MINUS ? 18 : 12) * u);
+        } else if (isDrop(b)) {
             BOOL right = b == B_ZR || b == B_R; CGPoint c = [self dropCenter:b];
             setPath(_key[b], dropPath(c, [self dropR:b], right ? -M_PI_4 : -3 * M_PI_4, 4 * u)); placeLabel(_label[b], c, 16 * u);   // tip toward the near top corner
         } else if (isClick(b)) {
@@ -532,27 +633,86 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
         }
     }
     static const struct { int b; CGFloat angle; } arms[] = {{B_UP, 0}, {B_RIGHT, M_PI_2}, {B_DOWN, M_PI}, {B_LEFT, -M_PI_2}};   // the same arm in 90° steps
-    for (int i = 0; i < 4; i++) setPath(_key[arms[i].b], armPath(self.dpadCenter, self.dpadR, K_ARM_W * u, K_ARM_IN * u, arms[i].angle, 6 * u));
+    CGFloat armScale = self.dpadR / (K_DPAD_R * u);   // Brilliant's larger D-pad: arms as wide in proportion
+    for (int i = 0; i < 4; i++) setPath(_key[arms[i].b], armPath(self.dpadCenter, self.dpadR, K_ARM_W * u * armScale, K_ARM_IN * u * armScale, arms[i].angle, 6 * u));
+    if (_bd) [self layoutBrilliant:scale];
     CGFloat mr = K_MENU_R * u; CGPoint mc = self.menuCenter;
     _menu.frame = CGRectMake(mc.x - mr, mc.y - mr, 2 * mr, 2 * mr); _menu.layer.cornerRadius = mr;
     _menu.layer.shadowPath = [UIBezierPath bezierPathWithOvalInRect:_menu.bounds].CGPath;
     [_menu setImage:[UIImage systemImageNamed:@"gearshape.fill" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:13 * u weight:UIImageSymbolWeightSemibold]] forState:UIControlStateNormal];
-    setPath(_ring, circlePath(self.stickHome, [self stickR:0]));
-    CGFloat k = K_KNOB_R * u; _knob.bounds = CGRectMake(0, 0, 2 * k, 2 * k);
+    CGFloat R = [self stickR:0]; _ring.bounds = CGRectMake(0, 0, 2 * R, 2 * R);   // drawn around (R, R) and placed by refresh: Brilliant's stick moves to where the touch lands
+    setPath(_ring, circlePath(CGPointMake(R, R), R));
+    CGFloat k = (_bd ? K_BD_KNOB_R : K_KNOB_R) * u; _knob.bounds = CGRectMake(0, 0, 2 * k, 2 * k);
     setPath(_knob, circlePath(CGPointMake(k, k), k));
     CAShapeLayer *in = (CAShapeLayer *)_knob.sublayers.firstObject; CGPathRef ip = circlePath(CGPointMake(k, k), k * 0.62);
     in.frame = _knob.bounds; in.path = ip; CGPathRelease(ip);
+    if (_bd) {   // the Poké Ball: a frosted top half, the band across the middle and the centre button
+        for (CAShapeLayer *l in @[_ballTop, _ballBand, _ballButton]) l.frame = _knob.bounds;
+        CGMutablePathRef top = CGPathCreateMutable(); CGPathAddArc(top, NULL, k, k, k - 0.75, M_PI, 0, false); CGPathCloseSubpath(top); _ballTop.path = top; CGPathRelease(top);
+        CGMutablePathRef band = CGPathCreateMutable(); CGPathMoveToPoint(band, NULL, 0.75, k); CGPathAddLineToPoint(band, NULL, 2 * k - 0.75, k); _ballBand.path = band; CGPathRelease(band);
+        _ballBand.lineWidth = k * 0.16;
+        CGPathRef btn = circlePath(CGPointMake(k, k), k * 0.34); _ballButton.path = btn; CGPathRelease(btn); _ballButton.lineWidth = k * 0.12;
+    }
     [CATransaction commit];
     [self refresh];
+}
+// Brilliant: each key's symbol in its middle, its button mark at the top right, its line underneath. The symbols are SF Symbols drawn once per size as bitmaps, light and dark
+- (void)makeIcons:(CGFloat)size scale:(CGFloat)scale {
+    if (size == _iconSize) return;
+    _iconSize = size;
+    for (int b = 0; b < B_N; b++) for (int on = 0; on < 2; on++) {
+        if (_iconImg[b][on]) { CGImageRelease(_iconImg[b][on]); _iconImg[b][on] = NULL; }
+        NSString *n = bdIcon(b); if (!n.length) continue;
+        CGFloat pt = size * (b == B_A ? 1.25 : b == B_L || b == B_R ? 0.8 : 1.0);
+        UIImage *sym = [UIImage systemImageNamed:n withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:pt weight:UIImageSymbolWeightSemibold]];
+        if (!sym) continue;
+        UIImage *tinted = [sym imageWithTintColor:on ? k_textOn : [UIColor colorWithWhite:1 alpha:0.95] renderingMode:UIImageRenderingModeAlwaysOriginal];
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat]; fmt.scale = scale; fmt.opaque = NO;
+        UIImage *bmp = [[[UIGraphicsImageRenderer alloc] initWithSize:tinted.size format:fmt] imageWithActions:^(UIGraphicsImageRendererContext *c) { (void)c; [tinted drawAtPoint:CGPointZero]; }];
+        _iconImg[b][on] = CGImageRetain(bmp.CGImage);
+    }
+}
+- (void)layoutBrilliant:(CGFloat)scale {
+    CGFloat u = self.u, bh = K_BD_BADGE_H * MIN(u, 1.1);
+    [self makeIcons:round(17 * u) scale:scale];
+    for (int b = 0; b < B_N; b++) if (_icon[b]) {
+        CGPoint c; CGFloat r;   // the key's centre and its half height
+        if (bdArc(b)) { c = [self facePos:b]; r = [self keyR:b]; }
+        else { CGRect rc = [self pillRect:b]; c = CGPointMake(CGRectGetMidX(rc), CGRectGetMidY(rc)); r = rc.size.height / 2; }
+        CGFloat is = 2 * r * (b == B_A ? 0.62 : 0.58);
+        _icon[b].frame = CGRectMake(c.x - is / 2, c.y - is / 2, is, is); _icon[b].contentsScale = scale;
+        // the mark: a small white pill with the button's name, over the key's top right
+        CGFloat bw = _badgeText[b].string && [(NSString *)_badgeText[b].string length] > 1 ? bh * 1.5 : bh;
+        CGPoint bc = bdArc(b) ? CGPointMake(c.x + r * 0.74, c.y - r * 0.74) : CGPointMake(CGRectGetMaxX([self pillRect:b]) - 6 * u, CGRectGetMinY([self pillRect:b]) + 2 * u);
+        _badge[b].frame = CGRectMake(bc.x - bw / 2, bc.y - bh / 2, bw, bh);
+        CGPathRef bp = CGPathCreateWithRoundedRect(CGRectMake(0, 0, bw, bh), bh / 2, bh / 2, NULL); _badge[b].path = bp; CGPathRelease(bp);
+        placeLabel(_badgeText[b], CGPointMake(bw / 2, bh / 2), bh * 0.66); _badgeText[b].contentsScale = scale;
+        if (_sub[b]) {   // the line under the key; Y's and X's go to their left, +'s above, so the arc's lines do not overlap
+            CGFloat fs = 9.5 * MIN(u, 1.1); CGPoint sc = CGPointMake(c.x, c.y + r + fs);
+            if (b == B_Y || b == B_X) sc = CGPointMake(c.x - r - fs * 3.2, c.y);
+            else if (b == B_PLUS) sc = CGPointMake(c.x, c.y - r - fs * 0.9);
+            placeLabel(_sub[b], sc, fs); _sub[b].frame = CGRectInset(_sub[b].frame, -fs * 2, 0); _sub[b].contentsScale = scale;
+            _sub[b].font = (__bridge CFTypeRef)[UIFont systemFontOfSize:fs weight:UIFontWeightMedium];
+        }
+    }
 }
 - (void)safeAreaInsetsDidChange { [super safeAreaInsetsDidChange]; [self setNeedsLayout]; }
 - (void)refresh {   // pressed state → fill, sticks → knob position
     uint64_t all = _faceBits | _dpadBits | _btnBits;
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     for (int b = 0; b < B_N; b++) { BOOL on = (all >> b) & 1;
-        _key[b].fillColor = (on ? k_on : k_idle).CGColor; _label[b].foregroundColor = (on ? k_textOn : k_text).CGColor; }
-    CGPoint h = self.stickHome, o = [self knobOffset:0];
-    _knob.position = CGPointMake(h.x + o.x, h.y + o.y); _knob.fillColor = (_stick[0] ? k_on : k_idle).CGColor;
+        _key[b].fillColor = (on ? k_on : k_idle).CGColor; _label[b].foregroundColor = (on ? k_textOn : k_text).CGColor;
+        if (_bd && _icon[b]) {   // pressed: the key frosts, its symbol turns dark and its mark inverts
+            _icon[b].contents = (__bridge id)_iconImg[b][on];
+            _badge[b].fillColor = (on ? [UIColor colorWithWhite:0.17 alpha:1] : [UIColor colorWithWhite:1 alpha:0.88]).CGColor;
+            _badge[b].strokeColor = (on ? [UIColor colorWithWhite:1 alpha:0.9] : [UIColor colorWithWhite:0 alpha:0.25]).CGColor;
+            _badgeText[b].foregroundColor = (on ? UIColor.whiteColor : [UIColor colorWithWhite:0.17 alpha:1]).CGColor;
+        }
+    }
+    CGPoint h = [self stickCentre:0], o = [self knobOffset:0];
+    _ring.position = h;
+    _knob.position = CGPointMake(h.x + o.x, h.y + o.y);
+    _knob.fillColor = (_bd ? [UIColor colorWithWhite:1 alpha:_stick[0] ? 0.3 : 0.18] : _stick[0] ? k_on : k_idle).CGColor;
     [CATransaction commit];
 }
 
@@ -747,7 +907,7 @@ void dm_gamepad_arrange(UIView *view, DmLayout layout) { [(DmGamepad *)view arra
 void dm_gamepad_opmode_changed(void) { [g_view opmodeChanged]; }
 void dm_gamepad_touch_feedback(bool on) { [g_view setTouchFeedback:on]; }
 int dm_pad_layout(void) { return g_view ? [g_view padLayout] : 0; }
-bool dm_pad_layout_offered(int layout) { return layout == 0 || layout == 1 || (layout == 2 && dm_opmode() == 0); }
+bool dm_pad_layout_offered(int layout) { return layout == 0 || layout == 1 || (layout == 2 && dm_opmode() == 0) || (layout == 3 && DM_GAME_PAD_LAYOUT == 3); }   // Brilliant only in a game whose profile asks for it
 void dm_pad_layout_set(int layout) { [g_view setPadLayout:layout]; }
 void dm_gamepad_active(void) { dispatch_async(dispatch_get_main_queue(), ^{ for (GCController *c in GCController.controllers) dm_motion_rearm(c); }); }   // On become active: motion_apple.h
 void dm_gamepad_reset(void) {   // On resign active: release everything (a key held while switching away and released in background gets no "release")

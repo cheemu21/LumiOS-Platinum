@@ -354,8 +354,28 @@ HLE_FORCE("_ZN2nn2gs3sdk26SetGraphicsFrameLengthModeENS1_23GraphicsFrameLengthMo
           void, h_gs_FrameLength, int mode) {
     static int last = -1; if (mode != last) { LOG("gs: graphics frame length mode %d (0 auto, 1 30 fps, 2 60 fps, 3 120 fps)", mode); last = mode; }
 }
-HLE_FORCE("_ZN2nn2oe27GetDefaultDisplayResolutionEPiS1_", "default display resolution: 1920x1080 docked, 1280x720 handheld", void, h_oe_DefRes, int *w, int *h) {
-    int con = opmode() == 1; if (w) *w = con ? 1920 : 1280; if (h) *h = con ? 1080 : 720;
+// Wide view (DM_WIDE_VIEW, profile wide_view on): a screen wider than 16:9 (an iPhone's 19.5:9) gets a display of its shape, as tall as the Switch's and wider. A game that sizes its
+// frame buffer from this (Unity: Pokémon Brilliant Diamond's player makes its window and its cameras' aspect from it) renders the wider view itself, so nothing is stretched: the 3D
+// shows more at the sides, and a HUD anchored to the screen's edges follows them. The value is the screen's width / height, 1.78 to 2.4; auto is resolved by the iOS front end to the
+// screen's shape (a Mac window has none: 19.5:9 there); 0 or unset keeps 16:9. The width is a multiple of 16 (the swapchain's tiles)
+double dm_wide_aspect(void) {
+    static double a = -1; if (a >= 0) return a;
+    const char *e = getenv("DM_WIDE_VIEW"); a = 0;
+    if (!e || !*e || !strcmp(e, "0")) return a;
+    if (!strcmp(e, "auto") || !strcmp(e, "1")) { a = 19.5 / 9; return a; }   // the iOS front end replaces auto with the screen's ratio before the game starts
+    char *end; double v = strtod(e, &end);
+    if (end == e || *end || !(v >= 1.78 && v <= 2.4)) { LOG("[RED] DM_WIDE_VIEW=%s: a width / height from 1.78 to 2.4, auto, or 0; keeping 16:9", e); return a; }
+    return a = v;
+}
+HLE_FORCE("_ZN2nn2oe27GetDefaultDisplayResolutionEPiS1_", "default display resolution: 1920x1080 docked, 1280x720 handheld (wider with DM_WIDE_VIEW)", void, h_oe_DefRes, int *w, int *h) {
+    int con = opmode() == 1, hh = con ? 1080 : 720, ww = con ? 1920 : 1280;
+    double a = dm_wide_aspect();
+    if (a > 0) {
+        ww = (int)(hh * a / 16 + 0.5) * 16;
+        static int said; if (!said) { said = 1; LOG("wide view: display %dx%d (%.3f:1, DM_WIDE_VIEW) in place of %dx%d", ww, hh, a, con ? 1920 : 1280, hh); }
+        extern void mtl_present_screen(uint32_t w, uint32_t h); mtl_present_screen((uint32_t)ww, (uint32_t)hh);   // a texture of that shape is shown in it (nvn_mtl.m present_shape)
+    }
+    if (w) *w = ww; if (h) *h = hh;
 }
 HLE_FORCE("_ZN2nn2oe38GetDefaultDisplayResolutionChangeEventEPNS_2os11SystemEventE", "default display resolution change event: bound, never signaled (the operation mode notification carries the change)",
           void, h_oe_DefResEv, void *ev) { hle_bind_system_event(ev, 0); }

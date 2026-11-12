@@ -83,6 +83,8 @@ static inline CGPoint dm_game_touch_point(CGRect game, CGPoint p) {
 UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_arrange(UIView *view, DmLayout layout);
 void dm_gamepad_reset(void);
+void dm_cheat_bubble_add(UIView *host);   // DmCheats.m: the in-game cheats bubble (DM_CHEAT_BUBBLE=1)
+void dm_cheat_bubble_layout(void);         // after a layout change: back to its place, over the pad
 void dm_gamepad_opmode_changed(void);   // the console mode changed (the in-game menu, a TV): the Tap layout exists only in handheld mode
 
 NS_ASSUME_NONNULL_END

@@ -110,6 +110,8 @@ const char *front_ios_device_check(void) {
     if (done++) return msg[0] ? msg : NULL;
     id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
     if (gpu.supportsBCTextureCompression) return NULL;
+    const char *opt = getenv("DM_BC_OPTIONAL");   // an ASTC build (scripts/astc_textures.py): GPUs without BC run it (nvn_mtl.m tex_desc leaves out the few BC textures left)
+    if (opt && *opt && strcmp(opt, "0")) { fprintf(stderr, "boot: %s has no BC textures; this build's are ASTC (DM_BC_OPTIONAL)\n", gpu ? gpu.name.UTF8String : "the GPU"); return NULL; }
     snprintf(msg, sizeof msg, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
              gpu ? gpu.name.UTF8String : "no Metal device");
     fprintf(stderr, "[RED] boot: %s\n", msg);

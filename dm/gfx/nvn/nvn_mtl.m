@@ -651,6 +651,8 @@ static void udc_selftest(void) {
         MLOG("UDC self-check %s %s %lux%lu first value %08x, values differing from it %lu / %lu", g_dev.name.UTF8String, depth ? "Depth32F_S8" : "RGBA8", (unsigned long)w, (unsigned long)h, px[0], (unsigned long)bad, (unsigned long)(w * h));
     }
 }
+// DM_BC_OPTIONAL=1: this build's textures were re-encoded as ASTC (scripts/astc_textures.py), so a GPU without BC formats runs it (mtl_init, tex_desc; main.m front_ios_device_check)
+static int bc_optional(void) { const char *e = getenv("DM_BC_OPTIONAL"); return e && *e && strcmp(e, "0"); }
 void mtl_init(void) {
     if (g_dev) return;
     const char *vbc = getenv("DM_NVN_VBUF_CACHE"); g_vbuf_cache = !(vbc && !strcmp(vbc, "0"));
@@ -693,7 +695,9 @@ void mtl_init(void) {
     }
     // BC textures are created and uploaded as BC, with no decompression path (dm/gfx/tex/README.md); without BC the first one aborts in Metal's descriptor validation mid-game
     // (GitHub issue #704: an iPhone 15, A16). The iOS front end refuses such a device before the launcher (main.m); this stops every other route at the device, with the reason
-    if (!g_dev.supportsBCTextureCompression) MDIE("the Metal device %s has no BC texture formats, which the games' textures use and the host does not decompress: an iPhone needs an A17 Pro or later, an iPad an M1 or later", g_dev.name.UTF8String);
+    // A build whose textures were re-encoded as ASTC (scripts/astc_textures.py; DM_BC_OPTIONAL=1 in its env.txt) runs on such a GPU: the few BC textures left are not made (tex_desc)
+    if (!g_dev.supportsBCTextureCompression && !bc_optional()) MDIE("the Metal device %s has no BC texture formats, which the games' textures use and the host does not decompress: an iPhone needs an A17 Pro or later, an iPad an M1 or later", g_dev.name.UTF8String);
+    if (!g_dev.supportsBCTextureCompression) MLOG("the Metal device %s has no BC texture formats: this build's textures are ASTC (DM_BC_OPTIONAL); a BC texture left in it is not made", g_dev.name.UTF8String);
     [g_q addResidencySet:g_res];
     [g_q4 addResidencySet:g_res];
     { void crash_set_wait_dump(void (*fn)(void)); void mtl_wait_state_dump(void); crash_set_wait_dump(mtl_wait_state_dump); }
@@ -2793,6 +2797,12 @@ static int tex_atomic_alias(id<MTLTexture> base) {
 static MTLTextureDescriptor *tex_desc(const tex_t *t, int packaged) {
     uint32_t pf = 0; uint8_t swz[4];
     if (!nvn_fmt_to_mtl(t->d.format, &pf, swz) || !pf) { RED_ONCE(0, "texture format %#x has no Metal equivalent (first case)", t->d.format); return nil; }
+    // A GPU without BC formats (an ASTC build, DM_BC_OPTIONAL): a BC texture is not made, as one of a format Metal lacks, so the stand-in texture is bound where it is sampled.
+    // The build re-encodes the game's BC textures as ASTC, so only the ones it could not read are left (Pokémon Brilliant Diamond: one texture of several images, one bundle)
+    if (pf >= MTLPixelFormatBC1_RGBA && pf <= MTLPixelFormatBC7_RGBAUnorm_sRGB && !g_dev.supportsBCTextureCompression) {
+        RED_ONCE(116, "BC texture %u×%u format %#x on a GPU without BC formats: not made, the stand-in is sampled (first case ser=%llu; scripts/astc_textures.py converts a game's BC textures)", t->d.width, t->d.height, t->d.format, (unsigned long long)t->serial);
+        return nil;
+    }
     // Metal's limits: 16384 in 2D, 2048 in 3D, 2048 array layers; beyond them Metal aborts the process on an assertion, so they are caught here with a red line
     if (t->d.width > 16384 || t->d.height > 16384 || t->d.depth > 2048) { RED_ONCE(71, "texture size exceeds Metal limits: %u×%u×%u levels %u format %#x target %d (first case ser=%llu)", t->d.width, t->d.height, t->d.depth, t->d.levels, t->d.format, t->d.target, (unsigned long long)t->serial); return nil; }
     MTLTextureDescriptor *d = [MTLTextureDescriptor new];

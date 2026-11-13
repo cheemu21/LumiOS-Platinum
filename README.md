@@ -13,16 +13,17 @@ LumiOS Platinum packs [Luminescent Platinum](https://luminescent.team) (Team Lum
 - **Luminescent Platinum 2.2F, whole.** Both halves of the mod are included. The `exefs` half (an IPS patch to `main` and the exlaunch plugin `subsdk1`) is applied when the app is built. The `romfs` half is laid over the game's files. iOS never has to change code while the game runs.
 - **Brilliant touch layout.** These touch controls follow how Brilliant Diamond uses its buttons. The keys are translucent and colourless, with no text: each shows a symbol and a small button mark at its corner.
   - A (✓) is the large key under your right thumb. B (↩), Y (⇄), X (☰) and + (☆, your registered key items) sit on an arc around it.
-  - The left stick is a fixed Poké Ball near the left edge: touch anywhere in its area and tilt from its centre. The D-pad above it has its own touch area, so the stick never presses it.
+  - The left stick is a Poké Ball near the left edge. Touch anywhere in its area and it appears under your thumb, then stays there while you push (it doesn't slide after your thumb). The D-pad above it has its own touch area, so the stick never presses it.
   - The top-right corner stays free, because the Pokétch shows there and you can tap it directly.
 - **Wide view (19.5:9).** The game renders the iPhone's full screen width itself. Nothing is stretched: models and the HUD keep their shapes. You can turn it off in the launcher to get 16:9 with bars.
-- **Cheats bubble.** A draggable button opens a panel of cheats while you play. Turn it on in the launcher. The cheat engine and the panel are in place, but the list of tested cheats is still to come.
+- **Cheats bubble.** A draggable button opens a panel of cheats while you play. Turn it on in the launcher. It comes with three cheats, each tested against the running game on the Mac: Max money (999,999), Infinite Rare Candies (999) and Infinite Master Balls (99). They change the game's data, not its code, so they work on iPhone.
+- **Older iPhones, with less memory used.** The build re-encodes the game's BC textures as ASTC, which every iPhone reads, at block sizes that keep each texture at or below its old size. Texture data shrinks from 5.5 GB to 3.4 GB.
 - **60 fps**, or 30 if you prefer: the Frame rate setting in the launcher.
 - **A repaired Luminescent file.** Luminescent 2.2F ships one Giratina texture bundle (`pokemons/common/pm0487_12_00`) with a broken block table, which no reader can open. The build repairs it in the app's copy of the game files and leaves your download untouched.
 
 ## Requirements
 
-- **iPhone:** A17 Pro chip or later (iPhone 15 Pro and newer), iOS 26 or later. The game's textures are BC-compressed, and older iPhones cannot read them. Converting them to ASTC for older phones is on the roadmap.
+- **iPhone:** iOS 26 or later. With the ASTC step below, any iPhone that runs iOS 26 can start the game (iPhone 11 and newer). Memory is then the limit: a phone with 6 GB or more is recommended, with Increased Memory Limit on. Without the ASTC step, the app needs an A17 Pro chip or later (iPhone 15 Pro and newer), because the game's original BC textures need it.
 - **Mac:** Apple silicon, macOS 26.6 or later, [Xcode 27.2](https://developer.apple.com/download/all/?q=Xcode%2027.2) with its iOS platform, [Homebrew](https://brew.sh) (`xcodegen`, `zstd`) and Python 3.12 or newer with `lz4`, `capstone` 5, `fonttools` and `zbic`.
 - **Files:** Pokémon Brilliant Diamond, base game plus update 1.3.0, as NSPs; `prod.keys`; Luminescent Platinum 2.2F for Brilliant Diamond (the folder with `exefs/` and `romfs/`).
 - **Disk:** about 25 GB free while building. The finished IPA is about 4.7 GB.
@@ -41,10 +42,20 @@ This extracts Brilliant Diamond into `GAME/0100000011D90000_build`. Next, lay Lu
 python3 scripts/prepare_mod.py GAME/0100000011D90000_build "path/to/Luminescent Platinum 2.2F BD" GAME/0100000011D90000_lumi --compact
 ```
 
-Then build the IPA from the modded game:
+For older iPhones and lower memory, re-encode the textures as ASTC (about 3 minutes; `pip install UnityPy texture2ddecoder` first). This writes a new image; put it in place of the old one:
 
 ```bash
-python3 scripts/build_ipa_from_nsp.py GAME -k GAME/prod.keys --work-dir GAME/0100000011D90000_lumi --app-name "Pokemon Luminescent Platinum" --icon icon.png -o LumiOS-Platinum.ipa
+python3 scripts/astc_textures.py GAME/0100000011D90000_lumi/extract/v393216/RomFS.img GAME/RomFS.astc.img --preset lean
+```
+
+```bash
+mv GAME/RomFS.astc.img GAME/0100000011D90000_lumi/extract/v393216/RomFS.img
+```
+
+Then build the IPA from the modded game. `env-astc.txt` holds the line `DM_BC_OPTIONAL=1`, which lets GPUs without BC run the ASTC build; leave `--env-file` out if you skipped the ASTC step:
+
+```bash
+python3 scripts/build_ipa_from_nsp.py GAME -k GAME/prod.keys --work-dir GAME/0100000011D90000_lumi --app-name "Pokemon Luminescent Platinum" --icon icon.png --env-file env-astc.txt -o LumiOS-Platinum.ipa
 ```
 
 To check the modded game on the Mac first, run the same command with `--platform mac` instead of `-o …`. Its last line is the command that starts the game.
@@ -67,21 +78,24 @@ The other rows (upscaling, render options, rumble) come from nxnative.
 ## Status
 
 - **Mac:** boots to Luminescent's language screen and through Rowan's introduction, at 60 fps with no errors. Wide view is checked there: the picture is 2.17:1, and Rowan and the dialogue box keep their proportions. In this scene the game's camera trims the top and bottom rather than showing more at the sides.
+- **ASTC build:** the Mac renders Rowan's introduction the same as with BC (a sampled pixel differs by 3 levels in 255). In that scene the process uses 1.69 GB resident (2.27 GB with BC); its iOS memory footprint is 2,119 MB (2,181 MB with BC), since the intro loads few textures.
+- **Cheats:** each one writes its value in the running game on the Mac; not yet seen on screen in a save.
 - **iPhone:** built, but not yet played on a phone.
 - **Brilliant Diamond's known issue:** physics problems above 30 fps have been reported on this game build. If movement looks wrong, set Frame rate to 30.
 
 ## Roadmap
 
-- A tested cheat list for the cheats bubble: data cheats first (money, items), then hooks for behaviour cheats.
-- Lower memory use, for the phones with the least to spare.
-- Older iPhones (A15 / A16): convert the game's BC textures to ASTC when the app is built.
+- More cheats: more data cheats, then built-in hooks for behaviour cheats (encounters, catch rate, shinies).
+- Lower memory use beyond the textures, for the phones with the least to spare.
+- Checking the ASTC build on an older iPhone.
 
 ## How it works
 
 - `scripts/prepare_mod.py` applies the mod. It patches `main` with the IPS (the module keeps its build ID), adds `subsdk1`, and writes a RomFS image with Luminescent's files in place. It also repairs a Unity bundle whose block table doesn't match its compressed blocks.
 - **`module_at`** (`dm/host/loader.c`): on the Switch, `subsdk1` sits at `main` + 0x5708000. It calls into `main` 1,228 times, and `main`'s patches branch back into it. So the loader places it at exactly that distance.
 - **Wide view** (`dm/tools/unity_fps.py`, `dm/host/hle_fpslock.c`): the build finds Unity's screen manager. While the game runs, the host asks Unity for the game's width at the screen's shape (1280x590 handheld, 1920x886 docked). Unity then sizes its cameras and HUD itself, and the presenter shows that crop in its own shape.
-- The touch layout is in `dm/ios/Sources/DmGamepad.m`. The cheats bubble is in `dm/ios/Sources/DmCheats.m`.
+- The touch layout is in `dm/ios/Sources/DmGamepad.m`. The cheats bubble is in `dm/ios/Sources/DmCheats.m`, and the cheats it ships are in `dm/games/0100000011D90000/cheats/`.
+- **ASTC** (`scripts/astc_textures.py`): each BC texture's mip levels are decoded and re-encoded (DXT1, BC4 and DXT5 as ASTC 6x6, BC5 and BC7 as 5x5), and the old bytes in the bundle's `.resS` stream are zeroed so the bundle doesn't grow. On a GPU without BC, the host (`nvn_mtl.m`) skips the two textures the converter can't read, instead of stopping.
 
 nxnative's own documentation is in [NXNATIVE.md](NXNATIVE.md) (supported games, building) and [docs/development.md](docs/development.md) (internals). The guides for working on the engine are in [docs/agents](docs/agents/README.md).
 
@@ -111,6 +125,8 @@ LumiOS Platinum is a thin layer over other people's work.
 - Apple's Xcode, Metal, MetalFX and SF Symbols (the touch layout's and the cheats panel's symbols).
 - [xcodegen](https://github.com/yonaskolb/XcodeGen) and [zstd](https://github.com/facebook/zstd).
 - [python-lz4](https://github.com/python-lz4/python-lz4), [Capstone](https://www.capstone-engine.org), [fontTools](https://github.com/fonttools/fonttools) and zbic.
+- For the ASTC step: [UnityPy](https://github.com/K0lb3/UnityPy) (MIT), [texture2ddecoder](https://github.com/K0lb3/texture2ddecoder) (MIT) and Arm's [ASTC encoder](https://github.com/ARM-software/astc-encoder) (Apache 2.0) through [astc-encoder-py](https://github.com/K0lb3/astc-encoder-py).
+- The cheats' memory paths follow Team Luminescent's [Luminescent_ExLaunch](https://github.com/TeamLumi/Luminescent_ExLaunch) headers (`PlayerWork`, `SaveItem`).
 
 **References**
 - Brilliant Diamond's controls, used to lay out the touch keys, came from [Bulbapedia](https://bulbapedia.bulbagarden.net), [Serebii](https://serebii.net/brilliantdiamondshiningpearl/poketch.shtml) and [Gamer Guides](https://www.gamerguides.com/pokemon-brilliant-diamond-and-shining-pearl).

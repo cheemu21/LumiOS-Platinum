@@ -10,8 +10,9 @@
 //   Brilliant (profile pad_layout brilliant; Pokémon Brilliant Diamond's buttons): plain translucent keys, each with a symbol of what it does and a small mark at its top right naming the Switch button.
 //     A (✓) is the large key under the right thumb; B (↩), Y (⇄), X (☰) and + (☆, registered key items) sit on an arc around it. L and ZL are pills at the top left; R (the Pokétch) and ZR are pills
 //     below the top-right corner, which stays free because the game shows the Pokétch there and takes touches on it (handheld mode). − sits left of the menu button. No key carries a
-//     line of text: the symbols and the button marks say it. The left stick is fixed near the left edge (tilt measured from its ring centre); a touch anywhere in its area (an L around the
-//     D-pad's own square, below and right of it) takes it, and the D-pad (larger, 8-way) is above it: a touch that starts in one area never acts on the other.
+//     line of text: the symbols and the button marks say it. The left stick rests near the left edge; a touch anywhere in its area (an L around the D-pad's own square, below and
+//     right of it) puts the stick's centre where it lands, and the centre then stays there while the finger pushes (it does not follow past the ring; the tilt is full there). The
+//     D-pad (larger, 8-way) is above it: a touch that starts in one area never acts on the other.
 //     The knob is a Poké Ball in the same colourless glass.
 //   Touch-down ownership: the menu button where it is nearer than a locked key (a view of its own, DmMenuButton), locked keys next (shoulders, − / +, L3 / R3), then whichever of the diamond, the D-pad and the left stick has the smallest distance / grab radius (the left stick's grab circle borders the D-pad),
 //     then in 3D the right stick for a touch in the right third.
@@ -136,10 +137,11 @@ static const CGFloat
     K_RSWIPE = 1.0 / 3,                             // right stick area: this fraction of the screen width from the right edge (not in u)
     K_CLICK_X = 102, K_CLICK_R = 17,                // L3 / R3: centre from the outer edge (level with ZL / ZR), radius
     // the Brilliant layout (x from the corner rectangle's outer edge, y from its bottom, unless noted)
-    K_BD_A_X = 71, K_BD_A_Y = 87, K_BD_A_R = 34,    // A: centre, radius
-    K_BD_ARC = 90, K_BD_KEY_R = 25,                 // B, Y, X, +: distance from A's centre, radius
+    K_BD_A_X = 84, K_BD_A_Y = 86, K_BD_A_R = 38,    // A: centre, radius
+    K_BD_ARC = 84, K_BD_KEY_R = 28,                 // B, Y, X, +: distance from A's centre, radius
+    K_BD_STEP = 48, K_BD_FIRST = 168,               // their angles (degrees, 0 = right, clockwise on screen): B at 168, then every 48: about 12 between neighbours, 18 to A
     K_BD_DPAD_X = 125, K_BD_DPAD_Y = 223, K_BD_DPAD_R = 49, K_BD_DPAD_BOX = 60,   // D-pad: centre, arm outer edge, half side of its own touch square
-    K_BD_STICK_X = 170, K_BD_STICK_Y = 91, K_BD_STICK_R = 60, K_BD_KNOB_R = 28,  // the stick: its fixed centre, ring and knob
+    K_BD_STICK_X = 170, K_BD_STICK_Y = 91, K_BD_STICK_R = 60, K_BD_KNOB_R = 28,  // the stick: where it rests untouched, ring and knob
     K_BD_AREA_IN = 37, K_BD_AREA_OUT = 133, K_BD_GAP = 8,   // the stick area: from this far in from the outer edge to this far right of the resting centre; kept this far off the D-pad's square
     K_BD_PILL_W = 70, K_BD_PILL_H = 32, K_BD_ZPILL_W = 58, K_BD_ZPILL_H = 26,   // L / R and ZL / ZR pills (x / y from the safe area)
     K_BD_L_X = 61, K_BD_ZL_X = 146, K_BD_LZ_Y = 43, // L and ZL: centres from the safe area's outer edge, from its top
@@ -169,6 +171,7 @@ static void pads_start(void);   // Physical controllers, below
     NSMapTable<UITouch *, NSNumber *> *_owner;     // touch → control (with the key for C_BTN or the stick for C_STICK, << 8)
     UITouch *_stick[2]; CGPoint _stickNow[2];      // the touch holding each stick and where it is now (0 left, 1 right)
     CGPoint _rCentre;                              // the right stick's centre: where its touch landed, dragged along past K_RSTICK_R
+    CGPoint _lCentre;                              // Brilliant: the left stick's centre, where its touch landed; it stays there for the whole touch
     uint64_t _faceBits, _dpadBits, _btnBits;
     NSMapTable<UITouch *, NSNumber *> *_faceOf;    // which keys each touch on the diamond currently holds
     CAShapeLayer *_key[B_N]; CATextLayer *_label[B_N];   // one layer per key
@@ -329,11 +332,11 @@ static CGPoint side(CGRect s, int right, CGFloat dx, CGFloat y) { return CGPoint
 - (CGFloat)faceHitR { return MAX(self.faceR * 1.25, _layout.separated ? 22 : 0); }
 - (CGPoint)bdA { CGRect s = self.corner; CGFloat u = self.u; return side(s, 1, K_BD_A_X * u, CGRectGetMaxY(s) - K_BD_A_Y * u); }
 - (CGFloat)keyR:(int)b { return !_bd ? self.faceR : (b == B_A ? K_BD_A_R : K_BD_KEY_R) * self.u; }
-- (CGFloat)keyHitR:(int)b { return MAX([self keyR:b] * 1.25, 22); }
+- (CGFloat)keyHitR:(int)b { return MAX([self keyR:b] * (_bd ? 1.18 : 1.25), 22); }   // Brilliant: neighbours' hit circles do not meet, so a touch between two presses neither twice
 - (CGPoint)facePos:(int)b { CGPoint c = self.faceCenter; CGFloat g = self.faceGap;
     if (_bd) {   // A, then B, Y, X and + on an arc around it, from the thumb's rest (lower left) up to the top
         CGPoint a = self.bdA; if (b == B_A) return a;
-        CGFloat deg = b == B_B ? 165 : b == B_Y ? 205 : b == B_X ? 245 : 285, r = K_BD_ARC * self.u;
+        CGFloat deg = K_BD_FIRST + K_BD_STEP * (b == B_B ? 0 : b == B_Y ? 1 : b == B_X ? 2 : 3), r = K_BD_ARC * self.u;
         return CGPointMake(a.x + r * cos(deg * M_PI / 180), a.y + r * sin(deg * M_PI / 180));
     }
     switch (b) { case B_A: return CGPointMake(c.x + g, c.y); case B_B: return CGPointMake(c.x, c.y + g); case B_X: return CGPointMake(c.x, c.y - g); default: return CGPointMake(c.x - g, c.y); } }
@@ -347,7 +350,7 @@ static CGPoint side(CGRect s, int right, CGFloat dx, CGFloat y) { return CGPoint
     if (_bd) return side(s, 0, K_BD_STICK_X * self.u, CGRectGetMaxY(s) - K_BD_STICK_Y * self.u);
     return side(s, 0, K_STICK_X * self.u, CGRectGetMaxY(s) - K_PAD_Y * self.u);
 }
-- (CGPoint)stickCentre:(int)i { return i ? _rCentre : self.stickHome; }
+- (CGPoint)stickCentre:(int)i { return i ? _rCentre : (_bd && _stick[0]) ? _lCentre : self.stickHome; }
 - (CGFloat)stickR:(int)i { return (i ? K_RSTICK_R : _bd ? K_BD_STICK_R : K_STICK_R) * self.u; }
 - (CGRect)bdDpadBox { CGPoint c = self.dpadCenter; CGFloat h = K_BD_DPAD_BOX * self.u; return CGRectMake(c.x - h, c.y - h, 2 * h, 2 * h); }
 - (BOOL)inBdStickArea:(CGPoint)p {   // the stick's area: an L below and right of the D-pad's square, kept K_BD_GAP off it, so a touch starting in one never acts on the other
@@ -525,7 +528,7 @@ int front_web_touch(void);
         CGFloat f = [self faceGrab:p]; if (f <= best) { best = f; kind = C_FACE; }
         if (_bd && kind == C_NONE) {   // Brilliant: the D-pad's square, else the stick's area; never both
             if (CGRectContainsPoint(self.bdDpadBox, p)) kind = C_DPAD;
-            else if (!_stick[0] && [self inBdStickArea:p]) kind = C_STICK;   // the fixed stick, tilted from its centre
+            else if (!_stick[0] && [self inBdStickArea:p]) { kind = C_STICK; _lCentre = p; }   // the stick appears where the touch lands; pushing past its ring does not move it
         }
         if (_bd) best = 0;   // the areas decided it: the generic checks below do not run
         if (_full) { CGFloat d = dist(p, self.dpadCenter) / MAX(self.dpadR * K_DPAD_GRAB, _layout.separated ? 22 : 0); if (d < best) { best = d; kind = C_DPAD; } }

@@ -24,7 +24,11 @@ int dm_pkx_pending(void);
 static NSDictionary *pkx_names(void) {
     static NSDictionary *d; static dispatch_once_t once;
     dispatch_once(&once, ^{ NSString *p = [[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"pkx.json"];
-        NSData *j = [NSData dataWithContentsOfFile:p]; d = j ? [NSJSONSerialization JSONObjectWithData:j options:0 error:nil] : @{}; });
+        NSData *j = [NSData dataWithContentsOfFile:p]; NSError *e = nil; id o = j ? [NSJSONSerialization JSONObjectWithData:j options:0 error:&e] : nil;
+        d = [o isKindOfClass:NSDictionary.class] ? o : @{};
+        id sp = d[@"species"];   // the log says what the form has, so an empty one explains itself
+        LOG("front end: pkx names %s: %s, %lu species%s%s", p.fileSystemRepresentation, j ? "read" : "missing", (unsigned long)([sp isKindOfClass:NSArray.class] ? [sp count] : 0),
+            e ? ", JSON error: " : "", e ? e.localizedDescription.UTF8String : ""); });
     return d;
 }
 @interface DmPkxForm : UIScrollView <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate>   // scrolls: the whole form fits a phone held sideways
@@ -69,7 +73,9 @@ static UIButton *pkx_button(UIView *v, NSString *s) {
         [_dest setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.1 alpha:1]} forState:UIControlStateSelected]; [self addSubview:_dest];
         _add = pkx_button(self, @"Add"); [_add addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];
         _back = pkx_button(self, @"Back"); [_back addTarget:self action:@selector(back) forControlEvents:UIControlEventTouchUpInside];
-        _status = pkx_label(self, @"The game makes it, as its own gifts. A full party sends it to the first empty box slot."); _status.numberOfLines = 2; _status.font = [UIFont systemFontOfSize:11.5]; _status.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+        NSUInteger nsp = [self list:@"species"].count;
+        _status = pkx_label(self, nsp ? [NSString stringWithFormat:@"%lu species to pick from. The game makes it, as its own gifts; a full party sends it to a box.", (unsigned long)(nsp ? nsp - 1 : 0)]
+                                      : @"The species names did not load: type a species number (25 is Pikachu)."); _status.numberOfLines = 2; _status.font = [UIFont systemFontOfSize:11.5]; _status.textColor = [UIColor colorWithWhite:1 alpha:0.75];
     }
     return self;
 }
@@ -87,6 +93,7 @@ static UIButton *pkx_button(UIView *v, NSString *s) {
     _back.frame = CGRectMake(0, y, 70, 34); _add.frame = CGRectMake(78, y, w - 78, 34); y += 40;
     _status.frame = CGRectMake(0, y, w, 32); y += 36;
     self.contentSize = CGSizeMake(w, y);
+    static int logged; if (!logged++) LOG("front end: pkx form laid out %.0fx%.0f, content %.0f tall", self.bounds.size.width, self.bounds.size.height, y);
     UIView *field = _hitsFor ? _itemField : _search;   // suggestions under the field being typed in
     _hits.frame = CGRectMake(0, CGRectGetMaxY(field.frame) + 4, w, MIN(150, MAX(60, self.contentSize.height - CGRectGetMaxY(field.frame) - 8)));
 }

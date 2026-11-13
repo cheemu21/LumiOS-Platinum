@@ -30,7 +30,10 @@ zip_store	.bin:.dat:.en:.fr:.ge:.h:.it:.jp:.ko:.ress:.si:.sp:.tr:.webm:.metallib
 mem_reserve	0x140000000
 mem_alias	0x118000000
 mem_stack	0x10000000
-app_pool	0x80000000
+# Luminescent Platinum needs more than Brilliant Diamond: on an iPhone (A20 Pro) the alias region filled to 2.01 GB of the 2 GB pool after about 4 minutes of play, and the
+# game's allocator then returned null (main+0x2605cc, its "Overloaded New ... More than %d" path). 3 GB: StandardAllocator's region then ends near alias +3.0 GB, with the
+# rest of the 4.38 GB alias region left for Unity's own (they reached 0.75 GB beside the 1.94 GB one). A pool only bounds the game: memory is committed as it is used
+app_pool	0xC0000000
 # the NPDM declares 16 MB of system resource
 sys_resource	0x1000000
 

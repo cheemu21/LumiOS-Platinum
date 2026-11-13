@@ -254,6 +254,9 @@ static void *ctl_main(void *arg) {
                 if (!strncmp(line, "bufsnap ", 8)) {   // bufsnap <shader key> <hex address> <bytes> <path>: guest memory as the GPU left it right after that shader's next dispatch (nvn_mtl.m dm_gfx_bufsnap)
                     void dm_gfx_bufsnap(const char *key, uint64_t a, size_t n, const char *path); char key[32] = {0}, path[512] = {0}; unsigned long long a = 0, n = 0;
                     if (sscanf(line + 8, "%31s %llx %lli %511s", key, &a, &n, path) == 4) dm_gfx_bufsnap(key, a, (size_t)n, path); else LOG("DM_CTL: bufsnap <shader key> <hex address> <bytes> <path>"); continue; }
+                if (!strncmp(line, "pkx ", 4)) {   // pkx <species> <level> [shiny] [nature] [ivs] [form] [item] [ball]: add a Pokémon (hle_pkx.c)
+                    int v[8] = {0, 0, 0, -1, 0, 0, 0, 0}; sscanf(line + 4, "%d %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
+                    int dm_pkx_request(int, int, int, int, int, int, int, int); dm_pkx_request(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]); continue; }
                 if (!strncmp(line, "peek ", 5)) { void dm_ctl_peek(uint64_t a, int n); char *e2; uint64_t a = strtoull(line + 5, &e2, 16); dm_ctl_peek(a, (int)strtol(e2, NULL, 0)); continue; }
                 if (!strncmp(line, "memdump ", 8)) { void dm_ctl_memdump(uint64_t a, uint64_t n, const char *path); char *e2, *e3; uint64_t a = strtoull(line + 8, &e2, 16), n = strtoull(e2, &e3, 0);
                                                      while (*e3 == ' ') e3++; dm_ctl_memdump(a, n, e3); continue; }
@@ -636,6 +639,7 @@ uint64_t dm_cheats_keys(void) {
 // the shared sampling number by about 16 per frame, and with only entry 0 written neither stick did anything in play (the camera did not turn at its first hint) while buttons
 // and menus (the stick's direction bits) worked; with every entry written the camera turns
 static int states(NpadState *out, int n, uint32_t id, uint32_t style) {
+    { void dm_pkx_tick(void); dm_pkx_tick(); }   // a queued "add a Pokémon" (hle_pkx.c) runs here, on the game's main thread
     if (n <= 0) return 0;
     fill(out, id, style);
     for (int i = 1; i < n; i++) { out[i] = out[0]; out[i].sampling = out[0].sampling - i; }

@@ -7,11 +7,125 @@
 #import <UIKit/UIKit.h>
 #include "dm.h"
 #import "DmLayout.h"
+#ifndef DM_GAME_PKX
+#define DM_GAME_PKX 0   // the Add a Pokémon form (profile pkx; game_profile.h): off where the profile does not say
+#endif
 
 static NSString *const k_bubble_pos = @"DmCheatBubble";   // NSUserDefaults: the bubble's centre as a fraction of the view (x, y)
 
 @interface DmCheatPanel : UIView <UITableViewDataSource, UITableViewDelegate>
 @end
+
+// ---- Add a Pokémon (profile pkx on; hle_pkx.c makes it with the game's own code, on its main thread) ----
+// The names come from the game's own message tables, put into the app at build time (dm/pkx.json, dm/tools/pkx_names.py); without them the form takes numbers
+int dm_pkx_request(int monsno, int level, int shiny, int nature, int ivs, int form, int item, int ball);
+void dm_pkx_status(char *out, size_t n);
+int dm_pkx_pending(void);
+static NSDictionary *pkx_names(void) {
+    static NSDictionary *d; static dispatch_once_t once;
+    dispatch_once(&once, ^{ NSString *p = [[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"pkx.json"];
+        NSData *j = [NSData dataWithContentsOfFile:p]; d = j ? [NSJSONSerialization JSONObjectWithData:j options:0 error:nil] : @{}; });
+    return d;
+}
+@interface DmPkxForm : UIView <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate>
+@property (nonatomic, copy) void (^done)(void);
+@end
+@implementation DmPkxForm {
+    UITextField *_search; UITableView *_hits; NSArray<NSNumber *> *_found;
+    UISlider *_level; UILabel *_levelLabel; UISwitch *_shiny, *_ivs; UIButton *_nature, *_ball, *_add, *_back; UILabel *_status;
+    int _monsno, _natureNo, _ballNo; NSTimer *_poll;
+}
+static UILabel *pkx_label(UIView *v, NSString *s) { UILabel *l = [UILabel new]; l.text = s; l.textColor = UIColor.whiteColor; l.font = [UIFont systemFontOfSize:13]; [v addSubview:l]; return l; }
+static UIButton *pkx_button(UIView *v, NSString *s) {
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem]; [b setTitle:s forState:UIControlStateNormal]; b.tintColor = UIColor.whiteColor;
+    b.backgroundColor = [UIColor colorWithWhite:1 alpha:0.14]; b.layer.cornerRadius = 9; b.layer.borderWidth = 1; b.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.5].CGColor;
+    b.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]; [v addSubview:b]; return b;
+}
+- (instancetype)initWithFrame:(CGRect)f {
+    if ((self = [super initWithFrame:f])) {
+        _natureNo = -1; _ballNo = 4;
+        _search = [UITextField new]; _search.placeholder = @"Species: name or number"; _search.textColor = UIColor.whiteColor; _search.delegate = self;
+        _search.attributedPlaceholder = [[NSAttributedString alloc] initWithString:_search.placeholder attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.5]}];
+        _search.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12]; _search.layer.cornerRadius = 9; _search.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 8)]; _search.leftViewMode = UITextFieldViewModeAlways;
+        _search.autocorrectionType = UITextAutocorrectionTypeNo; _search.returnKeyType = UIReturnKeyDone;
+        [_search addTarget:self action:@selector(searchChanged) forControlEvents:UIControlEventEditingChanged]; [self addSubview:_search];
+        _hits = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain]; _hits.dataSource = self; _hits.delegate = self; _hits.rowHeight = 30;
+        _hits.backgroundColor = [UIColor colorWithWhite:0 alpha:0.35]; _hits.layer.cornerRadius = 8; _hits.hidden = YES; [self addSubview:_hits];
+        _levelLabel = pkx_label(self, @"Level 50"); _level = [UISlider new]; _level.minimumValue = 1; _level.maximumValue = 100; _level.value = 50;
+        _level.minimumTrackTintColor = [UIColor colorWithWhite:1 alpha:0.85]; [_level addTarget:self action:@selector(levelChanged) forControlEvents:UIControlEventValueChanged]; [self addSubview:_level];
+        pkx_label(self, @"Shiny").tag = 11; _shiny = [UISwitch new]; _shiny.onTintColor = [UIColor colorWithWhite:1 alpha:0.85]; [self addSubview:_shiny];
+        pkx_label(self, @"Perfect IVs").tag = 12; _ivs = [UISwitch new]; _ivs.on = YES; _ivs.onTintColor = [UIColor colorWithWhite:1 alpha:0.85]; [self addSubview:_ivs];
+        _nature = pkx_button(self, @"Nature: Random"); _nature.showsMenuAsPrimaryAction = YES; [self rebuildNatureMenu];
+        _ball = pkx_button(self, @"Ball: Poké Ball"); _ball.showsMenuAsPrimaryAction = YES; [self rebuildBallMenu];
+        _add = pkx_button(self, @"Add to party"); [_add addTarget:self action:@selector(add) forControlEvents:UIControlEventTouchUpInside];
+        _back = pkx_button(self, @"Back"); [_back addTarget:self action:@selector(back) forControlEvents:UIControlEventTouchUpInside];
+        _status = pkx_label(self, @"The game makes it, as its own gifts. It needs a free party slot."); _status.numberOfLines = 2; _status.font = [UIFont systemFontOfSize:11.5]; _status.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+    }
+    return self;
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat w = self.bounds.size.width, y = 4, half = (w - 8) / 2;
+    _search.frame = CGRectMake(0, y, w, 32); y += 40;
+    _hits.frame = CGRectMake(0, y, w, MIN(150, self.bounds.size.height - y - 4));
+    _levelLabel.frame = CGRectMake(0, y, 80, 30); _level.frame = CGRectMake(84, y, w - 84, 30); y += 36;
+    [self viewWithTag:11].frame = CGRectMake(0, y, 60, 31); _shiny.frame = CGRectMake(60, y, 51, 31);
+    [self viewWithTag:12].frame = CGRectMake(half + 8, y, 80, 31); _ivs.frame = CGRectMake(w - 51, y, 51, 31); y += 40;
+    _nature.frame = CGRectMake(0, y, half, 32); _ball.frame = CGRectMake(half + 8, y, half, 32); y += 40;
+    _back.frame = CGRectMake(0, y, 70, 34); _add.frame = CGRectMake(78, y, w - 78, 34); y += 40;
+    _status.frame = CGRectMake(0, y, w, 32);
+}
+- (NSArray *)list:(NSString *)k { id v = pkx_names()[k]; return [v isKindOfClass:NSArray.class] ? v : @[]; }
+- (void)rebuildNatureMenu {
+    NSMutableArray *a = [NSMutableArray arrayWithObject:[UIAction actionWithTitle:@"Random" image:nil identifier:nil handler:^(UIAction *x) { (void)x; self->_natureNo = -1; [self->_nature setTitle:@"Nature: Random" forState:UIControlStateNormal]; }]];
+    NSArray *n = [self list:@"natures"];
+    for (int i = 0; i < 25; i++) { NSString *t = i < (int)n.count && [n[i] length] ? n[i] : [NSString stringWithFormat:@"Nature %d", i];
+        [a addObject:[UIAction actionWithTitle:t image:nil identifier:nil handler:^(UIAction *x) { (void)x; self->_natureNo = i; [self->_nature setTitle:[@"Nature: " stringByAppendingString:t] forState:UIControlStateNormal]; }]]; }
+    _nature.menu = [UIMenu menuWithChildren:a];
+}
+- (void)rebuildBallMenu {   // balls 1 to 16 are items 1 to 16 (their item numbers are the ball IDs)
+    NSMutableArray *a = [NSMutableArray array]; NSArray *it = [self list:@"items"];
+    for (int i = 1; i <= 16; i++) { NSString *t = i < (int)it.count && [it[i] length] ? it[i] : [NSString stringWithFormat:@"Ball %d", i];
+        if (i == 4) [_ball setTitle:[@"Ball: " stringByAppendingString:t] forState:UIControlStateNormal];
+        [a addObject:[UIAction actionWithTitle:t image:nil identifier:nil handler:^(UIAction *x) { (void)x; self->_ballNo = i; [self->_ball setTitle:[@"Ball: " stringByAppendingString:t] forState:UIControlStateNormal]; }]]; }
+    _ball.menu = [UIMenu menuWithChildren:a];
+}
+- (void)levelChanged { _levelLabel.text = [NSString stringWithFormat:@"Level %d", (int)lroundf(_level.value)]; }
+- (void)searchChanged {   // matches by name (prefix first) or by number
+    NSString *q = [_search.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].lowercaseString; NSArray *sp = [self list:@"species"];
+    NSMutableArray *pre = [NSMutableArray array], *mid = [NSMutableArray array];
+    if (q.length) {
+        int num = q.intValue;
+        if (num > 0) [pre addObject:@(num)];
+        for (NSUInteger i = 1; i < sp.count && pre.count + mid.count < 40; i++) { NSString *n = [sp[i] lowercaseString]; if (!n.length || (int)i == num) continue;
+            if ([n hasPrefix:q]) [pre addObject:@(i)]; else if ([n containsString:q]) [mid addObject:@(i)]; }
+    }
+    _found = [pre arrayByAddingObjectsFromArray:mid]; _hits.hidden = !_found.count; [_hits reloadData]; [self bringSubviewToFront:_hits];
+}
+- (NSString *)nameOf:(int)n { NSArray *sp = [self list:@"species"]; return n > 0 && n < (int)sp.count && [sp[n] length] ? sp[n] : [NSString stringWithFormat:@"#%d", n]; }
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return _found.count; }
+- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *c = [t dequeueReusableCellWithIdentifier:@"h"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"h"];
+    int n = _found[ip.row].intValue; c.textLabel.text = [NSString stringWithFormat:@"%@  #%d", [self nameOf:n], n]; c.textLabel.textColor = UIColor.whiteColor; c.textLabel.font = [UIFont systemFontOfSize:13];
+    c.backgroundColor = UIColor.clearColor; return c;
+}
+- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    _monsno = _found[ip.row].intValue; _search.text = [self nameOf:_monsno]; _hits.hidden = YES; [_search resignFirstResponder];
+}
+- (BOOL)textFieldShouldReturn:(UITextField *)f { if (_found.count) [self tableView:_hits didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]]; [f resignFirstResponder]; return YES; }
+- (void)add {
+    if (_monsno <= 0) { int n = _search.text.intValue; if (n > 0) _monsno = n; }
+    if (_monsno <= 0) { _status.text = @"Pick a species first."; return; }
+    if (dm_pkx_request(_monsno, (int)lroundf(_level.value), _shiny.on, _natureNo, _ivs.on ? 6 : 0, 0, 0, _ballNo) == 0) _status.text = @"Adding… (the game makes it at its next frame)";
+    [_poll invalidate];
+    __weak DmPkxForm *ws = self;
+    _poll = [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *tm) { DmPkxForm *me = ws; if (!me) { [tm invalidate]; return; }
+        char st[160]; dm_pkx_status(st, sizeof st); me->_status.text = [NSString stringWithUTF8String:st];
+        if (!dm_pkx_pending()) { [tm invalidate]; [UIImpactFeedbackGenerator.new impactOccurredWithIntensity:0.6]; } }];
+}
+- (void)back { [_poll invalidate]; [_search resignFirstResponder]; if (self.done) self.done(); }
+@end
+
 @interface DmCheatBubble : UIButton
 @property (nonatomic, weak) UIView *host;
 @property (nonatomic, strong) DmCheatPanel *panel;
@@ -33,7 +147,8 @@ static NSString *const k_bubble_pos = @"DmCheatBubble";   // NSUserDefaults: the
         [t appendAttributedString:[NSAttributedString attributedStringWithAttachment:spark]];
         [t appendAttributedString:[[NSAttributedString alloc] initWithString:@"  Cheats" attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightBold], NSForegroundColorAttributeName: UIColor.whiteColor}]];
         title.attributedText = t; [self addSubview:title];
-        UILabel *hint = [UILabel new]; hint.tag = 2; hint.text = @"tap outside to close"; hint.font = [UIFont systemFontOfSize:11.5]; hint.textColor = [UIColor colorWithWhite:1 alpha:0.7]; hint.textAlignment = NSTextAlignmentRight;
+        if (DM_GAME_PKX) { UIButton *addp = pkx_button(self, @"+ Add a Pokémon"); addp.tag = 3; [addp addTarget:self action:@selector(openPkx) forControlEvents:UIControlEventTouchUpInside]; }
+        UILabel *hint = [UILabel new]; hint.tag = 2; hint.text = DM_GAME_PKX ? @"" : @"tap outside to close"; hint.font = [UIFont systemFontOfSize:11.5]; hint.textColor = [UIColor colorWithWhite:1 alpha:0.7]; hint.textAlignment = NSTextAlignmentRight;
         [self addSubview:hint];
         _table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
         _table.backgroundColor = UIColor.clearColor; _table.separatorColor = [UIColor colorWithWhite:1 alpha:0.15]; _table.dataSource = self; _table.delegate = self;
@@ -49,6 +164,13 @@ static NSString *const k_bubble_pos = @"DmCheatBubble";   // NSUserDefaults: the
     [self viewWithTag:1].frame = CGRectMake(18, 10, b.size.width / 2, 30);
     [self viewWithTag:2].frame = CGRectMake(b.size.width / 2, 10, b.size.width / 2 - 18, 30);
     _table.frame = CGRectMake(6, 46, b.size.width - 12, b.size.height - 52);
+    [self viewWithTag:3].frame = CGRectMake(b.size.width - 146, 10, 128, 28);
+    [self viewWithTag:4].frame = CGRectMake(16, 46, b.size.width - 32, b.size.height - 52);
+}
+- (void)openPkx {   // the form in place of the list; Back brings the list again
+    DmPkxForm *f = [[DmPkxForm alloc] initWithFrame:CGRectZero]; f.tag = 4; __weak DmCheatPanel *ws = self; _table.hidden = YES; [self viewWithTag:3].hidden = YES;
+    f.done = ^{ DmCheatPanel *me = ws; [[me viewWithTag:4] removeFromSuperview]; me->_table.hidden = NO; [me viewWithTag:3].hidden = NO; };
+    [self addSubview:f]; [self setNeedsLayout];
 }
 - (void)reload {
     _sections = [NSMutableArray new]; _rows = [NSMutableArray new];

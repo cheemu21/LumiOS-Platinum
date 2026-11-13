@@ -251,7 +251,8 @@ def header_one(g):
          f'#define DM_GAME_STDALLOC_CAP {int(g.get("stdalloc_cap", "0"), 0):#x}ull',   # StandardAllocator's address space with virtual address memory (hle_svc.c); 0 = what the alias region has room for
          f'#define DM_GAME_SCREEN_ASPECT {("off", "on").index(g.get("screen_aspect", "off"))}',
          f'#define DM_GAME_WIDE_VIEW {("off", "on").index(g.get("wide_view", "off"))}',   # the game draws a display wider than 16:9 in its own shape (hle_oe.c DM_WIDE_VIEW): off / on
-         f'#define DM_GAME_CHEAT_BUBBLE {("off", "on").index(g.get("cheat_bubble", "off"))}',   # the iOS cheats bubble (DmCheats.m) is offered: off / on   # stubs that follow a screen taller than 16:9 (DM_SCREEN_ASPECT): off / on
+         f'#define DM_GAME_CHEAT_BUBBLE {("off", "on").index(g.get("cheat_bubble", "off"))}',
+         f'#define DM_GAME_PKX {("off", "on").index(g.get("pkx", "off"))}',   # the cheats panel's Add a Pokémon form (hle_pkx.c): off / on   # the iOS cheats bubble (DmCheats.m) is offered: off / on   # stubs that follow a screen taller than 16:9 (DM_SCREEN_ASPECT): off / on
          f'#define DM_GAME_DISPLAY_VERSIONS {vers}',
          f'#define DM_GAME_PRESENT_DISPLAY {int(pi == "display")}',
          f'#define DM_GAME_CORE_PREEMPT {int(cp == "on")}',

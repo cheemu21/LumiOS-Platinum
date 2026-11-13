@@ -48,3 +48,5 @@ pad_layout	brilliant
 wide_view	on
 cheat_bubble	on
 # Luminescent Platinum 2.2F ships pokemons/common/pm0487_12_00 (a Giratina form's textures) with a wrong block table; scripts/prepare_mod.py repairs it in the modded image
+# The cheats panel's Add a Pokémon form (DmCheats.m, hle_pkx.c: the game makes the Pokémon, at main build 94ceae32's addresses)
+pkx	on

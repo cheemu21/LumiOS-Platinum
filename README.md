@@ -1,8 +1,8 @@
 # LumiOS Platinum
 
-**Pokémon Luminescent Platinum on iPhone, running natively.**
+**Pokémon Luminescent Platinum on iPhone and Mac, running natively.**
 
-LumiOS Platinum packs [Luminescent Platinum](https://luminescent.team) (Team Luminescent's romhack of Pokémon Brilliant Diamond) into an iPhone app. The game's own ARM64 code runs directly on the iPhone's CPU, and its graphics are translated to Metal. There is no emulator in between. It is built on [nxnative](https://github.com/seedds/nxnative).
+LumiOS Platinum packs [Luminescent Platinum](https://luminescent.team) (Team Luminescent's romhack of Pokémon Brilliant Diamond) into an iPhone app and a Mac app. The game's own ARM64 code runs directly on the iPhone's CPU, and its graphics are translated to Metal. There is no emulator in between. It is built on [nxnative](https://github.com/seedds/nxnative).
 
 > **You need your own copies.** This repository holds no game files, mod files, keys or firmware. You build the app yourself from your own dump of Pokémon Brilliant Diamond (update 1.3.0), your own `prod.keys`, and the Luminescent Platinum 2.2F release you downloaded. LumiOS Platinum is a fan project. It is not affiliated with or endorsed by Nintendo, The Pokémon Company, Game Freak, ILCA or Team Luminescent.
 
@@ -25,9 +25,10 @@ LumiOS Platinum packs [Luminescent Platinum](https://luminescent.team) (Team Lum
 ## Requirements
 
 - **iPhone:** iOS 26 or later. With the ASTC step below, any iPhone that runs iOS 26 can start the game (iPhone 11 and newer). Memory is then the limit: a phone with 6 GB or more is recommended, with Increased Memory Limit on. Without the ASTC step, the app needs an A17 Pro chip or later (iPhone 15 Pro and newer), because the game's original BC textures need it.
-- **Mac:** Apple silicon, macOS 26.6 or later, [Xcode 27.2](https://developer.apple.com/download/all/?q=Xcode%2027.2) with its iOS platform, [Homebrew](https://brew.sh) (`xcodegen`, `zstd`) and Python 3.12 or newer with `lz4`, `capstone` 5, `fonttools` and `zbic`.
+- **Mac (to play):** a Mac with Apple silicon (M1 or later). The Mac app runs the same game as the iPhone app, with a keyboard or a game controller.
+- **Mac (to build):** Apple silicon, macOS 26.6 or later, [Xcode 27.2](https://developer.apple.com/download/all/?q=Xcode%2027.2) with its iOS platform, [Homebrew](https://brew.sh) (`xcodegen`, `zstd`) and Python 3.12 or newer with `lz4`, `capstone` 5, `fonttools` and `zbic`.
 - **Files:** Pokémon Brilliant Diamond, base game plus update 1.3.0, as NSPs; `prod.keys`; Luminescent Platinum 2.2F for Brilliant Diamond (the folder with `exefs/` and `romfs/`).
-- **Disk:** about 25 GB free while building. The finished IPA is about 4.7 GB.
+- **Disk:** about 25 GB free while building. The finished IPA is about 4.5 GB; the Mac app shares the game files with the build folder on the same disk (APFS clones), so it takes little extra space there.
 
 ## Build
 
@@ -61,6 +62,21 @@ python3 scripts/build_ipa_from_nsp.py GAME -k GAME/prod.keys --work-dir GAME/010
 
 To check the modded game on the Mac first, run the same command with `--platform mac` instead of `-o …`. Its last line is the command that starts the game.
 
+### Build the Mac app
+
+The same build folder also makes a double-clickable Mac app. Do the steps above up to the IPA command (the ASTC step is optional on the Mac: Apple silicon reads both BC and ASTC), then:
+
+```bash
+python3 scripts/build_ipa_from_nsp.py GAME -k GAME/prod.keys --platform mac-app --work-dir GAME/0100000011D90000_lumi --app-name "Pokemon Luminescent Platinum" --icon icon.png -o "Pokemon Luminescent Platinum.app"
+```
+
+- The first build also prepares the game's graphics pipelines for your Mac, so the app doesn't build them on its first start. This takes a few minutes; later builds reuse it.
+- The app is signed ad hoc for your own Mac. Move it anywhere and double-click it. If macOS says it can't check the app, right-click it and choose **Open** once.
+- A settings window opens first, with the same settings as the iPhone launcher. Wide view is off by default on the Mac, since a Mac window isn't phone-shaped; turn it on there if you play in a wide window.
+- **Saves:** `~/Library/Application Support/nxnative/0100000011D90000/save`. **Log:** `~/Library/Logs/nxnative/0100000011D90000.log`.
+- **Controls:** a keyboard or any game controller macOS supports.
+- **Cheats:** the app's **Cheats** menu. **Show Cheats Window** (⌘⇧C) opens a panel with the same cheats as the iPhone's bubble; the app copies them into the cheats folder (`~/Library/Application Support/nxnative/0100000011D90000/cheats`) on each start. The Add a Pokémon form is on the iPhone only for now.
+
 ## Install
 
 The IPA is unsigned. Install it with a sideloading tool such as AltStore, Sideloadly or LiveContainer. If your tool offers **Increased Memory Limit**, turn it on. When something goes wrong, the app's log is `Documents/log.txt`, which you can reach through the Files app.
@@ -70,7 +86,7 @@ The IPA is unsigned. Install it with a sideloading tool such as AltStore, Sidelo
 | Setting | Default | What it does |
 |---|---|---|
 | Frame rate | 60 fps | 30 or 60 |
-| Wide view | On | The iPhone's full width (19.5:9), or Off for 16:9 with bars |
+| Wide view | On (iPhone), Off (Mac) | The screen's full width (19.5:9 on an iPhone), or Off for 16:9 with bars |
 | Cheats | Off | Shows the cheats bubble in the game |
 | Console mode | Handheld | Docked renders more pixels: sharper, but more work for the phone |
 

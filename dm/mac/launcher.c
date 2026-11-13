@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
 #include <signal.h>
@@ -207,6 +208,24 @@ int main(int argc, char **argv) {
     if (shown == 2) saved_choices();
     cloud_saves_folder();
     setenv("DM_ROOT", sup, 0); setenv("DM_ROMFS", romfs, 0); setenv("DM_TEMP", temp, 0);
+    {   // the cheat files the app ships (Resources/dm/cheats, pack_app.py from the profile) into <Application Support>/cheats, where the host reads them and keeps each cheat's
+        // on / off state (hle_cheats.c); a file there of another name is the player's and stays, one of the same name is replaced by the app's when they differ in size or time
+        char from[PATH_MAX], to[PATH_MAX]; snprintf(from, sizeof from, "%s/cheats", dm); snprintf(to, sizeof to, "%s/cheats", sup);
+        DIR *dir = opendir(from);
+        if (dir) {
+            mkdirs(to); struct dirent *e;
+            while ((e = readdir(dir))) {
+                if (e->d_name[0] == '.') continue;
+                char s1[PATH_MAX], d1[PATH_MAX]; struct stat a1, b1; snprintf(s1, sizeof s1, "%s/%s", from, e->d_name); snprintf(d1, sizeof d1, "%s/%s", to, e->d_name);
+                if (stat(s1, &a1) || !S_ISREG(a1.st_mode)) continue;
+                if (!stat(d1, &b1) && b1.st_size == a1.st_size && b1.st_mtime >= a1.st_mtime) continue;
+                int in = open(s1, O_RDONLY), out = open(d1, O_WRONLY | O_CREAT | O_TRUNC, 0644); char buf[65536]; ssize_t n;
+                if (in >= 0 && out >= 0) while ((n = read(in, buf, sizeof buf)) > 0) if (write(out, buf, (size_t)n) != n) break;
+                if (in >= 0) close(in); if (out >= 0) close(out);
+            }
+            closedir(dir);
+        }
+    }
     snprintf(p, sizeof p, "%s/msl", res); setenv("DM_MSL_DIR", p, 0);
     snprintf(p, sizeof p, "%s/font", dm); setenv("DM_FONT_DIR", p, 0);
     snprintf(p, sizeof p, "%s/shader_map.tsv", dm); if (!stat(p, &st)) setenv("DM_NVN_SHMAP", p, 0);

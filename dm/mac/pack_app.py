@@ -322,6 +322,8 @@ def pack(a):
     if pairs: shutil.copyfile(pairs, dm / 'pso_pairs.tsv')   # the split's copy, for a profile without the table
     if fonts: copy(fonts, dm / 'font', False)
     if a.env_file: shutil.copyfile(a.env_file, dm / 'env.txt')
+    cheats = Path(a.tables) / 'cheats'   # the profile's cheat files: the launcher copies them into <Application Support>/cheats, where the host reads them
+    if cheats.is_dir(): (dm / 'cheats').mkdir(); copy(sorted(p for p in cheats.iterdir() if p.is_file()), dm / 'cheats', False)
     if a.settings: shutil.copyfile(a.settings, dm / 'launcher.json')
     step('shader libraries'); msl_dst = res / 'msl' / (a.msl_name or msl.name); msl_dst.parent.mkdir(exist_ok=True); copy_msl(msl, msls, msl_dst, clone['msl'])
     if aoc: step('add-on content'); copy([aoc], res / 'aoc', clone['aoc'])

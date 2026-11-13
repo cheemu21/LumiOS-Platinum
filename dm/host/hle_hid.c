@@ -254,9 +254,9 @@ static void *ctl_main(void *arg) {
                 if (!strncmp(line, "bufsnap ", 8)) {   // bufsnap <shader key> <hex address> <bytes> <path>: guest memory as the GPU left it right after that shader's next dispatch (nvn_mtl.m dm_gfx_bufsnap)
                     void dm_gfx_bufsnap(const char *key, uint64_t a, size_t n, const char *path); char key[32] = {0}, path[512] = {0}; unsigned long long a = 0, n = 0;
                     if (sscanf(line + 8, "%31s %llx %lli %511s", key, &a, &n, path) == 4) dm_gfx_bufsnap(key, a, (size_t)n, path); else LOG("DM_CTL: bufsnap <shader key> <hex address> <bytes> <path>"); continue; }
-                if (!strncmp(line, "pkx ", 4)) {   // pkx <species> <level> [shiny] [nature] [ivs] [form] [item] [ball]: add a Pokémon (hle_pkx.c)
-                    int v[8] = {0, 0, 0, -1, 0, 0, 0, 0}; sscanf(line + 4, "%d %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
-                    int dm_pkx_request(int, int, int, int, int, int, int, int); dm_pkx_request(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]); continue; }
+                if (!strncmp(line, "pkx ", 4)) {   // pkx <species> <level> [shiny] [nature] [ivs] [form] [item] [ball] [box]: add a Pokémon (hle_pkx.c)
+                    int v[9] = {0, 0, 0, -1, 0, 0, 0, 0, 0}; sscanf(line + 4, "%d %d %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8]);
+                    int dm_pkx_request(int, int, int, int, int, int, int, int, int); dm_pkx_request(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]); continue; }
                 if (!strncmp(line, "peek ", 5)) { void dm_ctl_peek(uint64_t a, int n); char *e2; uint64_t a = strtoull(line + 5, &e2, 16); dm_ctl_peek(a, (int)strtol(e2, NULL, 0)); continue; }
                 if (!strncmp(line, "memdump ", 8)) { void dm_ctl_memdump(uint64_t a, uint64_t n, const char *path); char *e2, *e3; uint64_t a = strtoull(line + 8, &e2, 16), n = strtoull(e2, &e3, 0);
                                                      while (*e3 == ' ') e3++; dm_ctl_memdump(a, n, e3); continue; }

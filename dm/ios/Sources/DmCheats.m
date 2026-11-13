@@ -204,6 +204,7 @@ static UIButton *pkx_button(UIView *v, NSString *s) {
     _sections = [NSMutableArray new]; _rows = [NSMutableArray new];
     int n = dm_cheats_ncheats();
     for (int i = 0; i < n; i++) {
+        if (dm_cheat_flags_at(i) & (DM_CHEAT_SECTION_START | DM_CHEAT_SECTION_END)) continue;   // [--SectionStart:X--] / [--SectionEnd:X--]: they make the heading, not a row
         NSString *sec = [NSString stringWithUTF8String:dm_cheat_section_at(i)] ?: @"";
         if (!_sections.count || ![_sections.lastObject isEqualToString:sec]) { [_sections addObject:sec]; [_rows addObject:[NSMutableArray new]]; }
         [_rows.lastObject addObject:@(i)];
@@ -228,6 +229,8 @@ static UIButton *pkx_button(UIView *v, NSString *s) {
     c.textLabel.text = [NSString stringWithUTF8String:dm_cheat_name_at(i)];
     const char *why = dm_cheat_why_at(i), *note = dm_cheat_note_at(i);
     c.detailTextLabel.text = why && *why ? [NSString stringWithUTF8String:why] : note && *note ? [NSString stringWithUTF8String:note] : nil;
+    if (dm_cheat_kind_at(i) == 3) { c.accessoryView = nil; c.textLabel.textColor = [UIColor colorWithWhite:1 alpha:0.6]; return c; }   // a label (credits, a note): text, no switch
+    if (dm_cheat_kind_at(i) == 1) { c.accessoryView = nil; c.detailTextLabel.text = @"always on"; return c; }   // a master code: the engine runs it before the others
     if (why && *why) { c.accessoryView = nil; c.textLabel.textColor = [UIColor colorWithWhite:1 alpha:0.45]; return c; }   // the engine turned it off: unsupported here
     UISwitch *sw = [UISwitch new]; sw.on = dm_cheat_on_at(i); sw.tag = i;
     sw.onTintColor = [UIColor colorWithWhite:1 alpha:0.85]; sw.thumbTintColor = sw.on ? [UIColor colorWithWhite:0.17 alpha:1] : UIColor.whiteColor;
